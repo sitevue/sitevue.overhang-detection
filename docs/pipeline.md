@@ -56,7 +56,7 @@ Run `overhang bench VIDEO` on the machine to check (prints the number of workers
 
 ## Agreement with the research batch run
 
-The batch pipeline (in the research workspace) calibrated the inner opening size over the whole
+The batch pipeline ([research/](../research/README.md)) calibrated the inner opening size over the whole
 day and processed trays after the video ended. This repo fixes those calibrations in the config
 and runs tray by tray. On the busiest 10-29 session: same 695 trays, 693 picked from the same
 frame, 98.6% same class, same reliable flag on every tray; lip covered % differs by a median 0.06

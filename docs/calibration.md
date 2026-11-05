@@ -26,8 +26,9 @@ The camera must not move between building the map and running; if it does, rebui
 Run the pipeline on a video with a good number of clean trays (`overhang run VIDEO --out r.jsonl
 --debug-dir img`) and look at the review images: the green box should sit on the tray's outer
 edge and the magenta line on the lip→wall drop on clean sides. The size calibration scripts used
-for 10-29 (`calib_size.py`, `run_inner.py` calibration pass, `measure_empty.py` for empty trays)
-are in the research workspace; port them here when the second line is set up.
+for 10-29 are in [research/](../research/README.md): `calib_size.py` (outer size), the
+`run_inner.py` calibration pass (inner size), `measure_empty.py` and the edge-marking page in
+`research/labeller/` (corner radius and shift from hand-marked empty trays).
 
 ## Class cut-offs
 

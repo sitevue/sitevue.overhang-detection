@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  overhang-batch - one GPU instance and a scratch bucket for running the tray overhang
+  pipeline (SAM 2 plus classical geometry) over exported FPL grind footage. The instance
+  has no inbound ports and is reached only through Session Manager; it stops itself after
+  MaxHours. Delete the stack (after emptying the bucket) when the run is done.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: g6.2xlarge
+    AllowedValues: [g6.xlarge, g6.2xlarge, g6.4xlarge, g5.xlarge, g5.2xlarge]
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/deeplearning/ami/x86_64/oss-nvidia-driver-gpu-pytorch-2.14-amazon-linux-2023/latest/ami-id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A default-VPC subnet (public, so the instance can reach pip and Hugging Face)
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  MaxHours:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 12
+    Description: Safety stop - the instance shuts down (stops, not terminates) after this many hours
+  Owner:
+    Type: String
+    Default: pratham
+
+Resources:
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub overhang-batch-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-scratch-after-30-days
+            Status: Enabled
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 2}
+      Tags:
+        - {Key: Project, Value: overhang-batch}
+        - {Key: Owner, Value: !Ref Owner}
+
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DataBucket.Arn
+              - !Sub "${DataBucket.Arn}/*"
+            Condition:
+              Bool: {aws:SecureTransport: "false"}
+
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: overhang-batch worker - read and write its own scratch bucket, Session Manager access
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref AWS::AccountId}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: overhang-batch-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListOwnBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DataBucket.Arn
+              - Sid: ReadWriteOwnBucket
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:AbortMultipartUpload]
+                Resource: !Sub "${DataBucket.Arn}/*"
+      Tags:
+        - {Key: Project, Value: overhang-batch}
+
+  WorkerProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref WorkerRole]
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: overhang-batch worker - no inbound, outbound HTTPS only
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS to S3 SSM pip Hugging Face}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP for package mirrors}
+      Tags:
+        - {Key: Project, Value: overhang-batch}
+
+  Worker:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      IamInstanceProfile: !Ref WorkerProfile
+      InstanceInitiatedShutdownBehavior: stop
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 2
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !Ref SubnetId
+          AssociatePublicIpAddress: true
+          GroupSet: [!Ref WorkerSecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 200, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # safety stop: never run longer than MaxHours
+          shutdown -h +$(( ${MaxHours} * 60 ))
+          mkdir -p /opt/overhang && chmod 777 /opt/overhang
+      Tags:
+        - {Key: Name, Value: overhang-batch-worker}
+        - {Key: Project, Value: overhang-batch}
+        - {Key: Owner, Value: !Ref Owner}
+
+Outputs:
+  BucketName:
+    Value: !Ref DataBucket
+  InstanceId:
+    Value: !Ref Worker

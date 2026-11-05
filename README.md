@@ -70,6 +70,7 @@ src/overhang/
 docs/                      pipeline.md (how it works, speed), output.md, integration.md, calibration.md
 tests/                     fast tests (no GPU / video needed): `pytest`
 tools/compare_with_batch.py  check results against the research batch run
+research/                  batch pipeline, calibration scripts and experiments behind the method (reference)
 Dockerfile                 GPU service image for the site machine
 ```
 
