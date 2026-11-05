@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.DS_Store
+
+# data and outputs stay out of git
+*.mp4
+*.ts
+*.jsonl
+out/
+review/
+recordings/

@@ -1,0 +1,52 @@
+# FPL grind line, overhang camera (1456 x 1088, 10 fps).
+# Calibrated on the 2026-10-29 export. Paths are relative to this file.
+
+camera:
+  frame_size: [1456, 1088]        # width, height of the camera frames
+  fps: 10
+  # camera-angle correction built from the belt rollers (overhang scale-map ...)
+  scale_map: scale_maps/fpl-2026-10-29.json
+
+tray:
+  # outer tray size in corrected "frame-centre" pixels at HALF resolution (728 x 544 frames)
+  outer_size_half_px: [389.97, 288.14]
+  # inner opening (where the lip drops into the tray) at FULL resolution
+  inner_size_px: [724.01, 525.71]
+  inner_corner_radius_px: 45      # rounded inner corners (circle fit on an empty tray)
+  inner_shift_px: 4               # inner opening shift along the tray's length (+ = right), from hand-marked empty trays
+  # starting guess for the lip width per side (half-res px); only seeds the inner-edge search
+  lip_default_half_px: {left: 10.4, right: 18.9, top: 15.3, bottom: 12.9}
+
+tracking:
+  step: 2                         # analyse every 2nd frame (5 fps) for tracking
+  min_area: 12000                 # meat blob area (half-res px) that counts as a tray
+  match_px: 90                    # max centroid jump between analysed frames
+  edge_margin: 12                 # a tray counts as fully in view when its meat is this far from both frame edges
+  max_centre_dist: 140            # trays that never come this close to the frame centre are skipped (fragments)
+  emit_after_px: 60               # emit a tray once it has moved this far past its most central position
+
+sam:
+  model: facebook/sam2.1-hiera-small
+  dtype: float32                  # float32 = validated numbers; bfloat16 is ~2x faster on the GPU
+  device: auto                    # auto | cuda | cpu | mps
+
+# Customer classes. A tray is
+#   large  if meat past the green (outer) edge >= large_past_green_px
+#   small  else if lip covered % >= small_lip_cover_pct
+#   mild   else if lip covered % >= mild_lip_cover_pct
+#   none   otherwise
+# Starting values: they split the 10-29 reliable trays ~77 / 18 / 3 / 1 % like the line's slide.
+classes:
+  mild_lip_cover_pct: 10.5
+  small_lip_cover_pct: 18.5
+  large_past_green_px: 10000
+
+# floor light per class
+light:
+  none: green
+  mild: yellow
+  small: yellow
+  large: red
+
+runtime:
+  workers: 3                      # CPU processes for the per-tray measurement (each tray ~0.5-0.8 s of one core)

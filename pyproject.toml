@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sitevue-overhang"
+version = "0.1.0"
+description = "Tray overhang detection for the FPL grind line (camera -> per-tray overhang class)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "opencv-python-headless>=4.9",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+# SAM 2 tray masks. Install torch/torchvision for your GPU first (see README), then this.
+sam = ["transformers==5.22.1", "pillow>=10"]
+service = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+overhang = "overhang.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
