@@ -1,5 +1,7 @@
 """Compare hand-clicked inner/outer edge points on the empty-tray frames with the fits.
-usage: python overhang/analyze_hand_edges.py EDGES_DIR OUT_JPG"""
+usage: python overhang/analyze_hand_edges.py labeller/hand_edges.json OUT_JPG
+(needs the labeller images in labeller/img/raw/, which are not in the repo; regenerate them from the
+2026-11-04 clip at t = 81.0 / 81.1 / 81.2 s)"""
 import json, glob, os, sys, cv2, numpy as np
 D, OUT = sys.argv[1], sys.argv[2]
 T = {t["id"]: t for t in json.load(open("labeller/trays.json"))["trays"]}
@@ -23,8 +25,12 @@ def wall_fit(p, vertical):
     return lin, quad, float(np.sqrt(np.mean(r1 ** 2))), float(np.sqrt(np.mean(r2 ** 2))), float(np.abs(r1).max()), sag, span
 
 tiles, rows = [], []
-for path in sorted(glob.glob(os.path.join(D, "*.json"))):
-    d = json.load(open(path)); d = d.get("data", d); tid = d["tray"]; t = T[tid]
+if D.endswith(".json"):        # labeller/hand_edges.json: {tray id: {inner, outer, ...}}
+    DOCS = [dict(v, tray=k) for k, v in json.load(open(D)).items()]
+else:                          # one exported JSON document per tray
+    DOCS = [json.load(open(p)) for p in sorted(glob.glob(os.path.join(D, "*.json")))]
+for d in DOCS:
+    d = d.get("data", d); tid = d["tray"]; t = T[tid]
     img = cv2.imread(f"labeller/img/raw/{tid}.jpg")
     R, I = t["rect"], t["inner"]
     print(f"\n== {tid}  (frame at {t['t']} s)  inner points {len(d['inner'])}, outer points {len(d['outer'])}")

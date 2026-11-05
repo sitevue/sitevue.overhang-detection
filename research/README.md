@@ -6,6 +6,13 @@ These scripts are not packaged, not tested, and expect the layout they were writ
 run them from `research/` (so the scripts sit in `overhang/`), with videos and outputs in
 folders you pass as arguments or set via the `RUN` environment variable.
 
+## Getting the data
+
+`overhang/prepare_sessions.sh EXPORT/overhang OUT_DIR` turns an S3 export (6 s `.ts` segments per
+session) into one `.mp4` per session plus `sessions.json` (session start, seconds since midnight).
+The S3 sync command is at the top of the script. Segments are joined without re-encoding;
+checked to reproduce the 10-29 session videos frame for frame.
+
 ## Batch pipeline (whole export, day-level calibration)
 
 `overhang/gb10_job.sh SCALE_MAP.json TRAY_SIZE.json` ran the full export on a GB10:
@@ -35,7 +42,9 @@ folders you pass as arguments or set via the `RUN` environment variable.
 | `run_inner.py` (calibration pass) | Inner opening size (median rigid fit, size free, on clean trays) |
 | `measure_empty.py`, `analyze_hand_edges.py`, `score_edges.py` | Inner edge on empty trays vs hand-marked edges → corner radius 45 px, shift +4 px |
 | `calib_inner.py`, `calib_rim.py`, `calib_wall.py` | Earlier lip/wall calibration experiments |
-| `labeller/index.html` + `trays.json` | The edge-marking page used for the hand-marked empty trays (images not included) |
+| `labeller/index.html` + `trays.json` | The labelling / edge-marking page (images not included) |
+| `labeller/hand_edges.json` | Hand-marked inner (and some outer) edge points on 3 empty trays (e041-e043, 2026-11-04 clip at 81.0-81.2 s), in labeller image px (same frame as `trays.json` `rect`/`inner`) |
+| `labeller/tray_labels.json` | 218 trays labelled none/mild/small/large by eye (first test clip): mild 150, small 50, none 15, large 3. Use to tune the class cut-offs |
 
 ## Timing
 
