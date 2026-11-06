@@ -35,7 +35,7 @@ camera frames
 ## Speed
 
 Measured on a GB10 (ARM CPU, NVIDIA GB10 GPU), busiest 10-29 session (21 min of video,
-695 trays, belt averaging 33 trays/min, busiest minute 59):
+1,506 trays; the belt runs at ~90 trays/min when moving):
 
 | Stage | Where | Median per tray |
 |---|---|---|
@@ -47,20 +47,27 @@ Measured on a GB10 (ARM CPU, NVIDIA GB10 GPU), busiest 10-29 session (21 min of 
 | Measure + classify | CPU worker | 87 ms |
 | **Total** | | **~0.33 s per tray** |
 
-With 6 workers the whole 21-minute session ran in 88 s (~14× real time). The belt needs at most
-~1 tray/s, so one CPU worker would just keep up; the default is 3 for headroom.
+At ~90 trays/min the belt needs 1.5 trays/s, i.e. ~0.4 s of CPU per second: 1 worker keeps up;
+the default is 3 for headroom.
 
 The site machine (RTX 5070, 12 GB) has not been benchmarked yet. SAM uses 0.55 GB of GPU
 memory, and the GPU is <10% of the per-tray time, so the GPU is not the limit; the CPU is.
 Run `overhang bench VIDEO` on the machine to check (prints the number of workers needed).
 
-## Agreement with the research batch run
+## Belt speed and tracking (fixed 2026-11-05)
 
-The batch pipeline ([research/](../research/README.md)) calibrated the inner opening size over the whole
-day and processed trays after the video ended. This repo fixes those calibrations in the config
-and runs tray by tray. On the busiest 10-29 session: same 695 trays, 693 picked from the same
-frame, 98.6% same class, same reliable flag on every tray; lip covered % differs by a median 0.06
-points (8 trays by more than 1 point). Check with `tools/compare_with_batch.py`.
+The belt moves a tray ~180 full-res px per frame at 10 fps (a tray crosses the view in ~6 frames)
+and stops and restarts. The first tracker looked at every 2nd frame and matched blobs within 90
+half-res px of their last position, so tracks broke at every frame: it found only ~46% of the trays
+(695 of 1,506 on the busiest 10-29 session) and picked them at random positions, so 26% failed the
+edge-of-view check. The tracker now looks at every frame and matches each blob to where its tray
+should be (last position + speed). Same session: 1,506 trays (each tray in a hand-checked 5 s
+stretch picked exactly once), edge of view 1%, unreliable 5% (was 30%).
+
+Before that fix, this repo reproduced the research batch run exactly (same trays, 98.6% same
+class); the measurement code is unchanged, only which trays and frames get picked. The 10-29 batch
+numbers (4,396 trays, the 77/18/3/1 class split) come from the old tracker and so cover under half
+the trays, from biased positions.
 
 ## Known limits
 

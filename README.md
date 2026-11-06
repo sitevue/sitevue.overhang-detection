@@ -4,12 +4,15 @@ Tray overhang detection for the FPL grind line. A camera above the belt sees eve
 each tray this tells you how much meat hangs over the tray's lip, as a customer-facing class and
 a floor-light colour:
 
-| Class | Light | Meaning (default cut-offs, `configs/fpl-grind.yaml`) | Share on 10-29 |
+| Class | Light | Meaning (default cut-offs, `configs/fpl-grind.yaml`) | Share on 10-29* |
 |---|---|---|---|
 | `none` | green | lip covered < 10.5% | ~77% |
 | `mild` | yellow | lip covered 10.5–18.5% | ~18% |
 | `small` | yellow | lip covered ≥ 18.5% | ~3–4% |
 | `large` | red | ≥ 10,000 px of meat past the tray's outer edge | ~1% |
+
+\* Whole 10-29 day with the first tracker, which found under half the trays (see docs/pipeline.md);
+the cut-offs should be re-checked on a run with the fixed tracker and against hand labels.
 
 "Lip covered" = % of the band between the tray's inner opening and its outer edge that meat
 covers. A clean tray reads ~5%.
@@ -76,8 +79,9 @@ Dockerfile                 GPU service image for the site machine
 
 ## Status
 
-- Validated on the 2026-10-29 export (busiest session, 695 trays): same trays and 98.6% same
-  class as the research batch pipeline; ~0.33 s per tray on a GB10, 88 s for 21 min of video.
+- Measurement validated against the research batch pipeline on 2026-10-29 (98.6% same class).
+  Tracker fixed 2026-11-05 for the fast belt (~90 trays/min): finds every tray (the old one found
+  ~46%) and edge-of-view trays dropped from 26% to 1% (docs/pipeline.md). ~0.33 s per tray on a GB10.
 - Not yet run on the site machine (RTX 5070). Expect the GPU to be fine (SAM uses 0.55 GB and
   <10% of the time); run `overhang bench` there to size `runtime.workers`.
 - Class cut-offs are a first guess matched to the line's slide (77/18/3/1 %), not to hand labels.

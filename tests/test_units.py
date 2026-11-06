@@ -71,6 +71,29 @@ def _frame(x_centre, w=1456, h=1088):
     return f
 
 
+def test_tracker_fast_belt_every_tray_once_near_centre(cfg):
+    """FPL belt: trays move right to left ~180 full-res px per frame, a new tray every ~7 frames.
+    Each tray must be picked exactly once, close enough to the centre for the edge-of-view check."""
+    speed, spacing, n_trays = 180, 1260, 5          # full-res px per frame, px between tray centres
+    picks = []
+    tr = TrayTracker(cfg)
+    n_frames = int((1456 + 400 + spacing * n_trays) / speed) + 4
+    for i in range(n_frames):
+        f = np.full((1088, 1456, 3), 60, np.uint8)
+        for yy in range(40, 1088, 120):
+            for xx in range(30, 1456, 130):
+                cv2.rectangle(f, (xx, yy), (xx + 60, yy + 40), (0, 220, 240), -1)
+        for k in range(n_trays):
+            xc = 1456 + 400 + k * spacing - i * speed
+            cv2.rectangle(f, (int(xc - 300), 300), (int(xc + 300), 760), (40, 40, 200), -1)
+        picks += tr.update(i, f, timestamp=i / 10)
+    picks += tr.flush()
+    assert len(picks) == n_trays
+    # tray centre within ~half a frame step of the frame centre (full-res), well inside the
+    # +-200 px the edge-of-view check allows
+    assert all(abs(p.c[0] * 2 - 728) <= speed / 2 + 2 for p in picks)
+
+
 def test_tracker_one_pick_per_tray_near_centre(cfg):
     tr = TrayTracker(cfg)
     picks, emitted_at = [], None

@@ -1,7 +1,9 @@
 """Online tray tracker: follows meat blobs across frames and picks ONE frame per tray.
 
 Meat is found by colour on half-resolution frames, every `step`-th frame. Blobs are matched to
-the previous frame's tracks by nearest centroid. For each track the best frame is the one where
+tracks by distance to where each tray should be now (last position + its speed): the belt can move
+a tray ~90 half-res px per frame and also stops and restarts, so a track accepts a blob within
+`max_jump_px` along the belt (and `max_dy_px` across it) of that prediction, nearest first. For each track the best frame is the one where
 the tray is fully in view (meat clear of both frame edges) and closest to the frame centre.
 
 The tray is emitted as soon as it has moved `emit_after_px` past that best position (or when its
@@ -38,6 +40,8 @@ class _Track:
     best: Pick | None = None
     emitted: bool = False
     first_c: tuple = field(default=(0.0, 0.0))
+    vel: tuple = (0.0, 0.0)      # px per frame
+    n_obs: int = 0
 
 
 class TrayTracker:
@@ -73,14 +77,23 @@ class TrayTracker:
         red, _ = masks(small)
         _, blobs = meat_blobs(red, cfg.track_min_area)
         used, nxt, ready = set(), [], []
-        for tr in self.active:
-            best, bd = None, cfg.track_match_px
+        # match tracks to blobs around each track's predicted position, closest pairs first
+        cand = []
+        for ti, tr in enumerate(self.active):
+            dt = frame_index - tr.last_f
+            px, py = tr.last_c[0] + tr.vel[0] * dt, tr.last_c[1] + tr.vel[1] * dt
             for j, b in enumerate(blobs):
-                d = np.hypot(b["c"][0] - tr.last_c[0], b["c"][1] - tr.last_c[1])
-                if j not in used and d < bd:
-                    best, bd = j, d
+                dx, dy = b["c"][0] - px, b["c"][1] - py
+                if abs(dx) < cfg.track_max_jump_px and abs(dy) < cfg.track_max_dy_px:
+                    cand.append((np.hypot(dx, dy), ti, j))
+        match = {}
+        for _, ti, j in sorted(cand):
+            if ti not in match and j not in used:
+                match[ti] = j
+                used.add(j)
+        for ti, tr in enumerate(self.active):
+            best = match.get(ti)
             if best is not None:
-                used.add(best)
                 self._observe(tr, blobs[best], frame_index, full, small, timestamp, W)
                 nxt.append(tr)
                 if self._past_best(tr, blobs[best], W):
@@ -116,6 +129,11 @@ class TrayTracker:
         return past > cfg.track_emit_after_px and abs(b["c"][0] - W / 2) > tr.best_d + cfg.track_emit_after_px
 
     def _observe(self, tr, b, f, full, small, ts, W):
+        if tr.n_obs:
+            dt = max(f - tr.last_f, 1)
+            v = ((b["c"][0] - tr.last_c[0]) / dt, (b["c"][1] - tr.last_c[1]) / dt)
+            tr.vel = v if tr.n_obs == 1 else (0.5 * (tr.vel[0] + v[0]), 0.5 * (tr.vel[1] + v[1]))
+        tr.n_obs += 1
         tr.last_f, tr.last_c = f, tuple(b["c"])
         x, _, w, _ = b["bbox"]
         m = self.cfg.track_edge_margin

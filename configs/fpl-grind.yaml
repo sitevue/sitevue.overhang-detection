@@ -18,9 +18,10 @@ tray:
   lip_default_half_px: {left: 10.4, right: 18.9, top: 15.3, bottom: 12.9}
 
 tracking:
-  step: 2                         # analyse every 2nd frame (5 fps) for tracking
+  step: 1                         # analyse every frame: the belt moves a tray ~180 full-res px per frame at 10 fps
   min_area: 12000                 # meat blob area (half-res px) that counts as a tray
-  match_px: 90                    # max centroid jump between analysed frames
+  max_jump_px: 220                # a track accepts a blob this far (half-res px, along the belt) from where it predicts the tray
+  max_dy_px: 40                   # ... and this far across the belt
   edge_margin: 12                 # a tray counts as fully in view when its meat is this far from both frame edges
   max_centre_dist: 140            # trays that never come this close to the frame centre are skipped (fragments)
   emit_after_px: 60               # emit a tray once it has moved this far past its most central position

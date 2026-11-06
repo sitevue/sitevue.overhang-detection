@@ -110,7 +110,7 @@ def main(argv=None):
     b = sub.add_parser("bench", help="per-stage timing on this machine")
     b.add_argument("source")
     b.add_argument("--max-trays", type=int, default=150)
-    b.add_argument("--trays-per-min", type=float, default=60.0, help="belt rate to check against (busiest minute on 10-29: 59)")
+    b.add_argument("--trays-per-min", type=float, default=90.0, help="belt rate to check against (FPL grind runs ~90 trays/min)")
     b.set_defaults(fn=cmd_bench)
 
     m = sub.add_parser("scale-map", help="camera-angle correction from empty-belt frames")

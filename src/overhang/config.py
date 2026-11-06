@@ -23,9 +23,10 @@ class Config:
     inner_shift_u: float = 4.0
     lip_default: dict = field(default_factory=lambda: dict(left=10.4, right=18.9, top=15.3, bottom=12.9))
 
-    track_step: int = 2
+    track_step: int = 1
     track_min_area: int = 12000
-    track_match_px: float = 90.0
+    track_max_jump_px: float = 220.0
+    track_max_dy_px: float = 40.0
     track_edge_margin: int = 12
     track_max_centre_dist: float = 140.0
     track_emit_after_px: float = 60.0
@@ -70,7 +71,7 @@ class Config:
                 kw[dst] = float(tray[src])
         if "lip_default_half_px" in tray:
             kw["lip_default"] = {k: float(v) for k, v in tray["lip_default_half_px"].items()}
-        for k in ("step", "min_area", "match_px", "edge_margin", "max_centre_dist", "emit_after_px"):
+        for k in ("step", "min_area", "max_jump_px", "max_dy_px", "edge_margin", "max_centre_dist", "emit_after_px"):
             if k in trk:
                 kw["track_" + k] = trk[k]
         for k in ("model", "dtype", "device"):
