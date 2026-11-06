@@ -10,6 +10,8 @@ Before counting, two kinds of pixels are handled:
               belt rollers; no rollers means another tray is there, and meat more than 10 px past our
               outer edge on that end is that tray's meat (dropped).
   hand        a worker's blue glove or white sleeve over the tray makes the numbers unreliable (flag).
+              Only a glove over the tray's central area counts: a hand holding the tray's edge or
+              corner leaves the meat and lip visible and the numbers fine.
 """
 import cv2
 import numpy as np
@@ -23,6 +25,17 @@ NB_YELLOW = 0.03             # below this share of belt yellow among non-meat pi
 NB_CUT = 10                  # meat more than this past our outer edge, on a side with a next tray, is that tray's
 OUTER_TOL = 6                # px tolerance on the green edge
 VIEW_FAR = 140               # the next-tray check needs this many px past each end to be in view
+# Glove check, tuned on 770 grind-01 trays from 2026-11-06 (checked by eye): live gloves are often
+# in shadow (brightness ~60-80), so the colour rule accepts darker blue than the 10-29 one did
+# (saturation >= 150, brightness >= 110). The belt's own blue is mostly low-saturation (median 75),
+# hence saturation >= 120. Only the central 84% of the tray box is scored, so a hand at the edge or
+# corner (meat fully visible) does not count; 3% of that area is the line between "touching the
+# edge" (0-2.5%) and "over the tray" (4% and up).
+GLOVE_HUE = (100, 130)
+GLOVE_MIN_SAT, GLOVE_MIN_VAL = 120, 35
+GLOVE_AREA = 0.42            # half-size of the scored area, as a fraction of the tray (0.42 -> central 84%)
+GLOVE_MAX = 0.03             # glove share of that area above which the tray is "hand over tray"
+SLEEVE_MAX = 0.05            # white sleeve share of the whole tray box
 
 
 def measure_tray(full, own_half, outline, corners, how, cfg):
@@ -70,13 +83,16 @@ def measure_tray(full, own_half, outline, corners, how, cfg):
     xs, ys = xs[keep], ys[keep]
 
     # --- hand over the tray (blue glove / white sleeve)
-    ru, rv = np.meshgrid(np.linspace(-0.5, 0.5, 40) * W, np.linspace(-0.5, 0.5, 30) * H)
-    rx = np.clip((cx + ru * c_ - rv * s_).astype(int), 0, Wf - 1)
-    ry = np.clip((cy + ru * s_ + rv * c_).astype(int), 0, Hf - 1)
-    hh, ss, vv = cv2.split(cv2.cvtColor(np.ascontiguousarray(full[ry, rx]), cv2.COLOR_BGR2HSV))
-    glove = float(((hh >= 100) & (hh <= 130) & (ss >= 150) & (vv >= 110)).mean())
+    def sample_hsv(half_extent):
+        ru, rv = np.meshgrid(np.linspace(-half_extent, half_extent, 40) * W, np.linspace(-half_extent, half_extent, 30) * H)
+        rx = np.clip((cx + ru * c_ - rv * s_).astype(int), 0, Wf - 1)
+        ry = np.clip((cy + ru * s_ + rv * c_).astype(int), 0, Hf - 1)
+        return cv2.split(cv2.cvtColor(np.ascontiguousarray(full[ry, rx]), cv2.COLOR_BGR2HSV))
+    hh, ss, vv = sample_hsv(GLOVE_AREA)
+    glove = float(((hh >= GLOVE_HUE[0]) & (hh <= GLOVE_HUE[1]) & (ss >= GLOVE_MIN_SAT) & (vv >= GLOVE_MIN_VAL)).mean())
+    _, ss, vv = sample_hsv(0.5)
     sleeve = float(((ss < 35) & (vv >= 200)).mean())
-    occluded = glove > 0.01 or sleeve > 0.05
+    occluded = glove > GLOVE_MAX or sleeve > SLEEVE_MAX
 
     # --- inside / lip / past the edge
     inner_raw, inner_contour = opening_mask(corners, th, (Hf, Wf), cfg.inner_shift_u, cfg.inner_corner_r)

@@ -59,7 +59,7 @@ normal floor, not zero. Pixels are camera pixels after camera-angle correction (
 | `walls_measured` | Inner walls seen directly: capital L R T B = measured, lower case = placed from the opposite wall |
 | `inner_walls` | Same, per side: `measured` / `from_opposite` / `rigid` |
 | `next_tray_left/right` | Another tray touches this one on that end; `dropped_next_tray_px` = its meat removed |
-| `glove_frac`, `sleeve_frac`, `occluded` | Hand over the tray |
+| `glove_frac`, `sleeve_frac`, `occluded` | Hand over the tray: `glove_frac` = blue-glove share of the tray's central 84% (a hand holding the edge doesn't count), `occluded` when it is over 3% or a white sleeve covers over 5% of the tray |
 | `edge_of_view` | Tray (or the 140 px past each end) not fully in view |
 | `outline_ok`, `tray_spill_frac`, `belt_inside_frac` | Outer outline checks. `outline_ok` is false only when belt rollers show inside the box (`belt_inside_frac` > 1%: box on two trays or on belt) or the box is tilted past 30°. `tray_spill_frac` (SAM's mask leaking past the box) is a diagnostic only |
 | `outer` | Outer box: centre, angle, size (corrected full-res px) |
