@@ -175,6 +175,14 @@ def fit_outline(tray, own, red, half_bgr, W, H):
     inb = (bx >= 0) & (bx < yel.shape[1]) & (by >= 0) & (by < yel.shape[0])
     out["belt_inside_frac"] = float(yel[by[inb].astype(int), bx[inb].astype(int)].mean()) if inb.any() else 0.0
     out["tilt_ok"] = abs(np.rad2deg(th)) <= MAX_TILT_DEG
-    out["outline_ok"] = not (out["tray_spill_frac"] > 0.05 or sc < -0.25
-                             or out["belt_inside_frac"] > BELT_INSIDE_MAX or not out["tilt_ok"])
+    out["outline_ok"] = outline_ok(out["belt_inside_frac"], th)
     return out
+
+
+def outline_ok(belt_inside_frac, th):
+    """Is the green box on a tray? Only two signs reliably mean it is not: belt rollers visible
+    inside the box (it straddles two trays or sits on empty belt) and a box tilted past 30 deg.
+    SAM spill (tray_spill_frac) and a low fit_score are NOT used: on 48 by-eye-checked flagged trays
+    from grind-01 on 2026-11-06, the box was right on all 31 hand-free trays flagged only for those;
+    the box fit already ignores the spilled part of SAM's mask. Both stay in the result as diagnostics."""
+    return bool(belt_inside_frac <= BELT_INSIDE_MAX and abs(np.rad2deg(th)) <= MAX_TILT_DEG)

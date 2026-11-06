@@ -61,7 +61,7 @@ normal floor, not zero. Pixels are camera pixels after camera-angle correction (
 | `next_tray_left/right` | Another tray touches this one on that end; `dropped_next_tray_px` = its meat removed |
 | `glove_frac`, `sleeve_frac`, `occluded` | Hand over the tray |
 | `edge_of_view` | Tray (or the 140 px past each end) not fully in view |
-| `outline_ok`, `tray_spill_frac`, `belt_inside_frac` | Outer outline checks |
+| `outline_ok`, `tray_spill_frac`, `belt_inside_frac` | Outer outline checks. `outline_ok` is false only when belt rollers show inside the box (`belt_inside_frac` > 1%: box on two trays or on belt) or the box is tilted past 30°. `tray_spill_frac` (SAM's mask leaking past the box) is a diagnostic only |
 | `outer` | Outer box: centre, angle, size (corrected full-res px) |
 | `inner_corners` | Inner opening corners TL, TR, BR, BL (before the 4 px shift and corner rounding) |
 | `sam_score`, `timings_ms` | SAM confidence; time per stage on this machine |
