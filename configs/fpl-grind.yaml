@@ -25,6 +25,10 @@ tracking:
   edge_margin: 12                 # a tray counts as fully in view when its meat is this far from both frame edges
   max_centre_dist: 140            # trays that never come this close to the frame centre are skipped (fragments)
   emit_after_px: 60               # emit a tray once it has moved this far past its most central position
+  # R1, the pick zone (full-res x range): a tray is measured only from a frame where its meat is
+  # completely inside it. 1120 px wide = meat (~724) + room so the tray (780) and the 140 px
+  # next-tray window on each end stay in view, and > 2 frames of belt movement (~180 px/frame).
+  pick_zone_px: [168, 1288]
 
 sam:
   model: facebook/sam2.1-hiera-small

@@ -92,6 +92,21 @@ def test_tracker_fast_belt_every_tray_once_near_centre(cfg):
     # tray centre within ~half a frame step of the frame centre (full-res), well inside the
     # +-200 px the edge-of-view check allows
     assert all(abs(p.c[0] * 2 - 728) <= speed / 2 + 2 for p in picks)
+    assert all(p.in_zone and p.frame is not None for p in picks)
+
+
+def test_tracker_merged_trays_reported_not_measured(cfg):
+    """Two touching trays = one long meat blob that never fits inside the pick zone R1:
+    reported once as not in the zone (counted, not measured), never measured off-centre."""
+    tr = TrayTracker(cfg)
+    picks = []
+    for i in range(30):
+        f = np.full((1088, 1456, 3), 60, np.uint8)
+        xc = 1456 + 700 - i * 120
+        cv2.rectangle(f, (int(xc - 600), 300), (int(xc + 600), 760), (40, 40, 200), -1)   # 1200 px of meat
+        picks += tr.update(i, f, timestamp=i / 10)
+    picks += tr.flush()
+    assert len(picks) == 1 and not picks[0].in_zone and picks[0].frame is None
 
 
 def test_tracker_one_pick_per_tray_near_centre(cfg):

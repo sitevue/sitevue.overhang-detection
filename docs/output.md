@@ -13,10 +13,13 @@ after the tray passes the centre of the camera view.
 | `overhang_class` | `"none"` \| `"mild"` \| `"small"` \| `"large"` \| `"unknown"` | The customer-facing class |
 | `light` | `"green"` \| `"yellow"` \| `"red"` \| `null` | Floor-light colour for that class (config `light:`) |
 | `reliable` | bool | `false` when the numbers can't be trusted for this tray |
-| `unreliable_reasons` | list of str | `hand_over_tray`, `edge_of_view`, `outline_check`, `no_tray_mask`, or `error: …` |
+| `unreliable_reasons` | list of str | `hand_over_tray`, `edge_of_view`, `outline_check`, `no_tray_mask`, `not_in_pick_zone`, or `error: …` |
 
 `unknown` (with `light: null`) means no tray outline could be found for that tray (e.g. the tray mask
-failed); treat it as "no reading", not as a good tray.
+failed), or that the tray was never completely inside the pick zone (`not_in_pick_zone`: e.g. two
+touching trays merged into one blob, or the belt jumped it past). Such a tray is counted but not
+measured, and its result has only `tray_id`, `frame_index`, `timestamp`, `overhang_class`, `light`,
+`reliable` and `unreliable_reasons`. Treat it as "no reading", not as a good tray.
 
 Suggested UI rule: show the class for every tray, but grey it out or mark it when
 `reliable` is `false`; only reliable trays count in the summary (`/api/summary` already does this).
@@ -60,8 +63,8 @@ normal floor, not zero. Pixels are camera pixels after camera-angle correction (
 | `inner_walls` | Same, per side: `measured` / `from_opposite` / `rigid` |
 | `next_tray_left/right` | Another tray touches this one on that end; `dropped_next_tray_px` = its meat removed |
 | `glove_frac`, `sleeve_frac`, `occluded` | Hand over the tray: `glove_frac` = blue-glove share of the tray's central 84% (a hand holding the edge doesn't count), `occluded` when it is over 3% or a white sleeve covers over 5% of the tray |
-| `edge_of_view` | Tray (or the 140 px past each end) not fully in view |
-| `outline_ok`, `tray_spill_frac`, `belt_inside_frac` | Outer outline checks. `outline_ok` is false only when belt rollers show inside the box (`belt_inside_frac` > 1%: box on two trays or on belt) or the box is tilted past 30°. `tray_spill_frac` (SAM's mask leaking past the box) is a diagnostic only |
+| `edge_of_view` | The tray (its outer box) is cut off by the frame edge. The belt past each end need not be in view: if it isn't, the next-tray check treats that end as having no neighbour |
+| `outline_ok`, `tray_spill_frac`, `belt_inside_frac`, `other_meat_frac` | Outer outline checks. `outline_ok` is false only when belt rollers show inside the box (`belt_inside_frac` > 1%: box on two trays or on belt), another tray's meat covers over 5% of the box (`other_meat_frac`: box on two touching trays, where no belt shows between them), or the box is tilted past 30°. `tray_spill_frac` (SAM's mask leaking past the box) is a diagnostic only |
 | `outer` | Outer box: centre, angle, size (corrected full-res px) |
 | `inner_corners` | Inner opening corners TL, TR, BR, BL (before the 4 px shift and corner rounding) |
 | `sam_score`, `timings_ms` | SAM confidence; time per stage on this machine |

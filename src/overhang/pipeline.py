@@ -95,7 +95,7 @@ def measure(payload: dict, cfg: Config | None = None, rect: Rectifier | None = N
                                ("outline_check", not ol["outline_ok"])) if on]
     res.update(overhang_class=cls, light=light_for(cls, cfg), reliable=not reasons, unreliable_reasons=reasons, **num)
     res.update(outline_ok=ol["outline_ok"], tray_spill_frac=round(ol["tray_spill_frac"], 3),
-               belt_inside_frac=round(ol["belt_inside_frac"], 4),
+               belt_inside_frac=round(ol["belt_inside_frac"], 4), other_meat_frac=round(ol["other_meat_frac"], 4),
                outer=dict(cx=round(outer_full[0], 1), cy=round(outer_full[1], 1), deg=round(float(np.rad2deg(ol["th"])), 2),
                           w=round(outer_full[3], 1), h=round(outer_full[4], 1)),
                inner_corners=np.round(corners.astype(np.float64), 1).tolist(), inner_walls=how)
@@ -149,8 +149,13 @@ class OverhangPipeline:
             nonlocal submitted
             if max_trays is not None and submitted >= max_trays:
                 return
-            payload = prepare(pick, self.sam, cfg)
             submitted += 1
+            if not pick.in_zone:      # counted, not measured: never completely inside the pick zone
+                done[pick.tray_id] = dict(tray_id=pick.tray_id, frame_index=pick.frame_index, timestamp=pick.timestamp,
+                                          overhang_class="unknown", light=None, reliable=False,
+                                          unreliable_reasons=["not_in_pick_zone"])
+                return
+            payload = prepare(pick, self.sam, cfg)
             if pool is None:
                 done[pick.tray_id] = measure(payload)
             else:

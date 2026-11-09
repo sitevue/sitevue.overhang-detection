@@ -24,7 +24,6 @@ NB_NEAR, NB_FAR = 20, 140    # px past this tray's end where the next tray would
 NB_YELLOW = 0.03             # below this share of belt yellow among non-meat pixels -> a tray is there
 NB_CUT = 10                  # meat more than this past our outer edge, on a side with a next tray, is that tray's
 OUTER_TOL = 6                # px tolerance on the green edge
-VIEW_FAR = 140               # the next-tray check needs this many px past each end to be in view
 # Glove check, tuned on 770 grind-01 trays from 2026-11-06 (checked by eye): live gloves are often
 # in shadow (brightness ~60-80), so the colour rule accepts darker blue than the 10-29 one did
 # (saturation >= 150, brightness >= 110). The belt's own blue is mostly low-saturation (median 75),
@@ -114,8 +113,13 @@ def measure_tray(full, own_half, outline, corners, how, cfg):
     out_side = {sd: int((past_inner & (side == sd)).sum()) for sd in ("left", "right", "top", "bottom")}
 
     walls = "".join(sd[0].upper() if how[sd] == "measured" else sd[0] for sd in ("left", "right", "top", "bottom"))
+    # only the tray itself (its outer box) has to be in view. The belt past each end is not needed:
+    # when less than half of the next-tray strip is in view, that end is treated as having no
+    # neighbour (its meat is kept). On ~29,000 trays (10-29, 11-05, 11-06) the 17 that this makes
+    # readable with one end unseen all read correctly by eye, except one box on two touching
+    # trays, which the outline check now catches (other_meat_frac).
     edge_of_view = not all(0 <= cx + u * c_ - v * s_ < Wf and 0 <= cy + u * s_ + v * c_ < Hf
-                           for u in (-(W / 2 + VIEW_FAR), W / 2 + VIEW_FAR) for v in (-0.42 * H, 0.42 * H))
+                           for u in (-W / 2, W / 2) for v in (-H / 2, H / 2))
     num = dict(
         lip_cover_pct=round(100.0 * band_meat / max(band_px, 1), 2),
         outside_px=n_lip + n_bey,

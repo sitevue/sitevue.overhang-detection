@@ -30,6 +30,7 @@ class Config:
     track_edge_margin: int = 12
     track_max_centre_dist: float = 140.0
     track_emit_after_px: float = 60.0
+    pick_zone_px: tuple | None = (168, 1288)   # R1, full-res x range; None = whole frame
 
     sam_model: str = "facebook/sam2.1-hiera-small"
     sam_dtype: str = "float32"
@@ -82,6 +83,8 @@ class Config:
                 kw[k] = cls_[k]
         if "light" in y:
             kw["light"] = dict(y["light"])
+        if "pick_zone_px" in trk:
+            kw["pick_zone_px"] = tuple(trk["pick_zone_px"]) if trk["pick_zone_px"] else None
         if "workers" in rt:
             kw["workers"] = int(rt["workers"])
         return cls(**kw)

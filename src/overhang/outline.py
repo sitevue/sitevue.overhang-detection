@@ -8,11 +8,17 @@ All coordinates are HALF resolution, camera-corrected.
 import cv2
 import numpy as np
 
-from .color import masks, meat_blobs, tray_uv
+from .color import masks, meat_blobs, rect_corners, tray_uv
 
 TOL = 3                    # px tolerance on the tray outline
 MAX_TILT_DEG = 30.0        # trays travel lengthwise; a box tilted more than this is wrong
 BELT_INSIDE_MAX = 0.01     # more than 1% belt-roller yellow inside the box -> box is misplaced
+# Box on two touching trays: their walls meet with no belt between, so the belt test can't see it,
+# but the other tray's meat is inside the box. Over 10,114 trays (10-29 sessions + 11-05 clip) every
+# tray above 5% had its box on two trays or on a tray being handled (checked by eye); a correct box
+# with the neighbour's meat grazing its end scored 1.9%, and normal trays score 0.
+OTHER_MEAT_MAX = 0.05      # share of the box covered by meat from other trays
+OTHER_MOSTLY_INSIDE = 0.85  # a blob this much inside our box is our own meat torn apart, not a neighbour's
 
 
 def fit_full(tray, own, W, H):
@@ -174,15 +180,39 @@ def fit_outline(tray, own, red, half_bgr, W, H):
     by = cy + bu * np.sin(th) + bv * np.cos(th)
     inb = (bx >= 0) & (bx < yel.shape[1]) & (by >= 0) & (by < yel.shape[0])
     out["belt_inside_frac"] = float(yel[by[inb].astype(int), bx[inb].astype(int)].mean()) if inb.any() else 0.0
+    out["other_meat_frac"] = other_meat_frac(lab_all, other, own, cx, cy, th, W, H)
     out["tilt_ok"] = abs(np.rad2deg(th)) <= MAX_TILT_DEG
-    out["outline_ok"] = outline_ok(out["belt_inside_frac"], th)
+    out["outline_ok"] = outline_ok(out["belt_inside_frac"], th, out["other_meat_frac"])
     return out
 
 
-def outline_ok(belt_inside_frac, th):
-    """Is the green box on a tray? Only two signs reliably mean it is not: belt rollers visible
-    inside the box (it straddles two trays or sits on empty belt) and a box tilted past 30 deg.
+def other_meat_frac(lab, other, own, cx, cy, th, W, H):
+    """Share of the box (central 92% x 88%) covered by other trays' meat. A blob that lies almost
+    entirely inside the box is not counted: that is this tray's meat split in two (e.g. by a tool)."""
+    box = np.zeros(other.shape, np.uint8)
+    cv2.fillPoly(box, [np.round(rect_corners(cx, cy, 0.92 * W, 0.88 * H, th)).astype(np.int32)], 1)
+    box = box.astype(bool)
+    on_own = lab[own & (lab > 0)]
+    if len(on_own):   # own mask comes from the uncorrected frame: drop the slivers of our own blob
+        other = other & (lab != np.bincount(on_own).argmax())
+    if not box.any():
+        return 0.0
+    ids, n_in = np.unique(lab[box & other], return_counts=True)
+    if not len(ids):
+        return 0.0
+    n_all = np.bincount(lab[other].ravel(), minlength=int(ids.max()) + 1)[ids]
+    # a blob cut by the frame edge may look "mostly inside" only because the rest is out of view
+    at_edge = np.isin(ids, np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
+    keep = (n_in < OTHER_MOSTLY_INSIDE * n_all) | at_edge
+    return float(n_in[keep].sum() / box.sum())
+
+
+def outline_ok(belt_inside_frac, th, other_meat=0.0):
+    """Is the green box on a tray? Only three signs reliably mean it is not: belt rollers visible
+    inside the box (it straddles two trays or sits on empty belt), another tray's meat inside the box
+    (it straddles two touching trays) and a box tilted past 30 deg.
     SAM spill (tray_spill_frac) and a low fit_score are NOT used: on 48 by-eye-checked flagged trays
     from grind-01 on 2026-11-06, the box was right on all 31 hand-free trays flagged only for those;
     the box fit already ignores the spilled part of SAM's mask. Both stay in the result as diagnostics."""
-    return bool(belt_inside_frac <= BELT_INSIDE_MAX and abs(np.rad2deg(th)) <= MAX_TILT_DEG)
+    return bool(belt_inside_frac <= BELT_INSIDE_MAX and other_meat <= OTHER_MEAT_MAX
+                and abs(np.rad2deg(th)) <= MAX_TILT_DEG)
