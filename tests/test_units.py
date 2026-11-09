@@ -1,4 +1,5 @@
 """Fast tests: no SAM, no GPU, no video files."""
+import dataclasses
 import os
 
 import cv2
@@ -96,9 +97,9 @@ def test_tracker_fast_belt_every_tray_once_near_centre(cfg):
 
 
 def test_tracker_merged_trays_reported_not_measured(cfg):
-    """Two touching trays = one long meat blob that never fits inside the pick zone R1:
+    """With R1 on: two touching trays = one long meat blob that never fits inside the pick zone R1:
     reported once as not in the zone (counted, not measured), never measured off-centre."""
-    tr = TrayTracker(cfg)
+    tr = TrayTracker(dataclasses.replace(cfg, pick_zone_px=(168, 1288)))
     picks = []
     for i in range(30):
         f = np.full((1088, 1456, 3), 60, np.uint8)

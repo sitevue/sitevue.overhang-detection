@@ -16,7 +16,7 @@ after the tray passes the centre of the camera view.
 | `unreliable_reasons` | list of str | `hand_over_tray`, `edge_of_view`, `outline_check`, `no_tray_mask`, `not_in_pick_zone`, or `error: …` |
 
 `unknown` (with `light: null`) means no tray outline could be found for that tray (e.g. the tray mask
-failed), or that the tray was never completely inside the pick zone (`not_in_pick_zone`: e.g. two
+failed), or (only when the optional pick zone `pick_zone_px` is set, off by default) that the tray was never completely inside the pick zone (`not_in_pick_zone`: e.g. two
 touching trays merged into one blob, or the belt jumped it past). Such a tray is counted but not
 measured, and its result has only `tray_id`, `frame_index`, `timestamp`, `overhang_class`, `light`,
 `reliable` and `unreliable_reasons`. Treat it as "no reading", not as a good tray.

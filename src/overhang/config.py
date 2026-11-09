@@ -30,7 +30,7 @@ class Config:
     track_edge_margin: int = 12
     track_max_centre_dist: float = 140.0
     track_emit_after_px: float = 60.0
-    pick_zone_px: tuple | None = (168, 1288)   # R1, full-res x range; None = whole frame
+    pick_zone_px: tuple | None = None   # R1, full-res x range, e.g. (168, 1288); None = off (whole frame)
 
     sam_model: str = "facebook/sam2.1-hiera-small"
     sam_dtype: str = "float32"

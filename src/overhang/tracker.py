@@ -5,7 +5,11 @@ tracks by distance to where each tray should be now (last position + its speed):
 a tray ~90 half-res px per frame and also stops and restarts, so a track accepts a blob within
 `max_jump_px` along the belt (and `max_dy_px` across it) of that prediction, nearest first.
 
-Which frame gets measured: the pick zone R1 (`pick_zone_px`) is a band across the belt, centred,
+Which frame gets measured: by default (`pick_zone_px` unset), the frame where the tray is fully in
+view (meat clear of both frame edges) and closest to the frame centre; trays that never come within
+`max_centre_dist` of the centre are skipped as fragments.
+
+Optional, OFF by default until checked on the live stream: the pick zone R1 (`pick_zone_px`) is a band across the belt, centred,
 wider than a tray by more than one frame's movement plus room for the next-tray check on both
 ends. A tray is measured from the frame where its meat lies completely inside R1 and is closest to
 the frame centre. Half trays at R1's edges never qualify. A tray that came near the centre but was
@@ -71,9 +75,9 @@ class TrayTracker:
         if tr.emitted:
             return None
         tr.emitted = True
-        if tr.best is not None:
+        if tr.best is not None and tr.best_d <= self.cfg.track_max_centre_dist:
             p = tr.best
-        elif tr.any_best is not None and tr.any_d <= self.cfg.track_max_centre_dist:
+        elif tr.best is None and tr.any_best is not None and tr.any_d <= self.cfg.track_max_centre_dist:
             p = tr.any_best      # a tray, but never completely inside R1: report it, unmeasured
         else:
             return None          # never came near the centre: a fragment
@@ -134,7 +138,7 @@ class TrayTracker:
         crossed to the other side of the frame centre from where it came in, by emit_after_px,
         as a same-sized blob (touching trays merge into one bigger blob whose centroid jumps)."""
         cfg = self.cfg
-        if tr.emitted or tr.best is None:
+        if tr.emitted or tr.best is None or tr.best_d > cfg.track_max_centre_dist:
             return False
         if not 0.75 < b["area"] / max(tr.best.area, 1) < 1.33:
             return False
