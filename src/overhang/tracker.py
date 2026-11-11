@@ -36,7 +36,8 @@ blob is smooth and skin-coloured (`color.skin_like`) is dropped, not reported (`
 
 Spare frames: the last few frames with the tray fully in view are kept (`Pick.spares`), so a tray
 that is unreadable only because of its outline or the frame edge can be measured again on another
-frame (`retry_frames`).
+frame (`retry_frames`); one unreadable because a worker's hand is over it, on up to
+`retry_frames_hand` frames (the hand often moves away within a frame or two).
 
 The tray is emitted as soon as it has moved `emit_after_px` past its best position(s) (or when its
 track ends), so results come out while the tray is still on the belt instead of after the video.
@@ -143,11 +144,12 @@ class TrayTracker:
         if self.cfg.drop_bare_hands and p.half is not None and self._bare_hand(p):
             self.n_bare_hands += 1
             return None          # a bare hand over the belt, not a tray
-        if self.cfg.retry_frames > 0:
+        n_spare = max(self.cfg.retry_frames, self.cfg.retry_frames_hand)
+        if n_spare > 0:
             used = [p] + [v for v in (p.views or []) if v is not None] + ([p.backup] if p.backup is not None else [])
             ids = {id(x) for x in used}
             near = lambda q: min(abs(q.frame_index - u.frame_index) for u in used)
-            p.spares = sorted((q for q in tr.ring if id(q) not in ids), key=near)[: self.cfg.retry_frames]
+            p.spares = sorted((q for q in tr.ring if id(q) not in ids), key=near)[:n_spare]
         p.tray_id = self.n_emitted
         self.n_emitted += 1
         return p
@@ -255,7 +257,7 @@ class TrayTracker:
         if b["c"][0] - hw < 0 or b["c"][0] + hw > W:
             return
         pk = Pick(tray_id=-1, frame_index=f, timestamp=ts, c=tuple(b["c"]), area=b["area"], frame=full.copy(), half=small)
-        if self.cfg.retry_frames > 0:
+        if max(self.cfg.retry_frames, self.cfg.retry_frames_hand) > 0:
             tr.ring.append(pk)
         if self.cfg.dynamic_split_px is not None:
             if tr.dyn_r is None:

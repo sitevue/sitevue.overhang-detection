@@ -69,7 +69,7 @@ normal floor, not zero. Pixels are camera pixels after camera-angle correction (
 | `inner_corners` | Inner opening corners TL, TR, BR, BL (before the 4 px shift and corner rounding) |
 | `views` | Only with `side_views_px` (two frames per tray): `{left_half: {frame_index, cx}, right_half: {frame_index, cx}, combined}`. The tray's left half is measured in the first frame, its right half in the second; `frame_index`, `outer` and the other diagnostics are from the right-half frame. `combined: false` = only one photo was used for the whole tray: the other had no tray mask, or a problem the clean one did not (`left_view_failed` / `right_view_failed` lists it: a hand over the tray, edge of view, outline check). With `dynamic_split_px`, `views` is present only for trays that got two photos |
 | `sam_mask` | Present when SAM's first mask gave a box that failed the outline / edge-of-view check and another of its three masks passed: 1 or 2 = the mask used |
-| `frame_retry` | `true` when the tray was unreadable for its outline or the frame edge in its own frame(s) and was read on another frame with the tray in view (`retry_frames`) |
+| `frame_retry` | `true` when the tray was unreadable in its own frame(s) (outline, frame edge, or a hand over it) and was read on another frame with the tray in view (`retry_frames`, `retry_frames_hand`) |
 | `sam_score`, `timings_ms` | SAM confidence; time per stage on this machine |
 
 ## Example

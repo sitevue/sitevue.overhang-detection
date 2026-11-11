@@ -37,6 +37,7 @@ class Config:
     edge_tolerance_px: float = 0.0      # a tray box corner may be this far past the frame edge before edge_of_view
     drop_bare_hands: bool = True        # a "tray" whose meat is really a bare hand (smooth, skin-coloured) is not reported
     retry_frames: int = 2               # a tray unreadable only for outline / edge of view is re-measured on up to this many other frames
+    retry_frames_hand: int = 4          # ... and one unreadable because of a hand over it, on up to this many
 
     sam_model: str = "facebook/sam2.1-hiera-small"
     sam_dtype: str = "float32"
@@ -103,6 +104,8 @@ class Config:
             kw["drop_bare_hands"] = bool(trk["drop_bare_hands"])
         if "retry_frames" in trk:
             kw["retry_frames"] = int(trk["retry_frames"])
+        if "retry_frames_hand" in trk:
+            kw["retry_frames_hand"] = int(trk["retry_frames_hand"])
         if "workers" in rt:
             kw["workers"] = int(rt["workers"])
         return cls(**kw)

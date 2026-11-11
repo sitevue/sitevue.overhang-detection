@@ -55,6 +55,9 @@ tracking:
   # a tray unreadable only for its outline or the frame edge (not a hand) is measured again on up to
   # this many other frames with the tray in view, nearest first; SAM's other two masks are tried first
   retry_frames: 2
+  # ... and a tray unreadable because a worker's hand is over it, on up to this many (the hand often
+  # moves away within a frame or two)
+  retry_frames_hand: 4
 
 sam:
   model: facebook/sam2.1-hiera-small

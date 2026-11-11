@@ -100,7 +100,13 @@ Two options, both off by default because the class cut-offs were tuned at the fr
 - **A wrong box is retried.** Most outline / edge-of-view failures are a wrong first box: SAM's first mask
   covers some belt or the next tray. SAM returns three masks; when the first fails only these checks, the
   other two are tried (no extra GPU work). If none passes, the tray is measured on up to `retry_frames`
-  other frames with the tray in view (one SAM run each, only for these trays). A hand is not retried.
+  other frames with the tray in view (one SAM run each, only for these trays).
+- **A hand over the tray is retried on other frames.** A worker's hand often moves away within a frame or
+  two, so a tray unreadable because of a hand is measured on up to `retry_frames_hand` (4) other frames with
+  the tray in view, nearest first; the first one without a hand, with a good box on the meat, is used. (Not
+  with SAM's other masks: a different mask does not move the hand.) On the 10-29 day this took unreadable
+  trays from 163 to 117 (today's mode) and 127 to 101 (two views), with no readable tray changed; 12 random
+  trays read this way all had the tray clearly in view and the box on it (checked by eye).
   A retried box is a second guess, so it is used only if it sits on the meat: at most 15 % of the tray's meat
   outside it (`RETRY_MAX_OUTSIDE_PCT`). On the 10-29 day the correct rescues had 0-6 % outside (all readable
   trays: median 1.2 %, 99th percentile 8.7 %); three wrong ones had 22-53 % and read "large" with

@@ -60,6 +60,7 @@ def prepare(pick, sam, cfg: Config) -> dict:
 
 
 GEOMETRY = ("outline_check", "edge_of_view")    # problems another SAM mask or another frame can fix
+HAND = "hand_over_tray"                          # a worker's hand: another frame can fix it (not another mask)
 # A retried box (another SAM mask, another frame) is a second guess: it is used only if it sits on the meat.
 # On 10-29 the correct rescues had 0-6 % of the tray's meat outside the box (all readable trays: median 1.2 %,
 # 99th percentile 8.7 %); the three wrong ones 22-53 % (a box that passes the outline check but is not on the
@@ -244,6 +245,7 @@ class OverhangPipeline:
         futures, done, next_out = {}, {}, 0
         backups = {}             # tray_id -> [other frames], measured instead if the tray is unreadable only for its geometry
         firsts = {}              # tray_id -> the first result, kept if no other frame reads the tray
+        tries = {}               # tray_id -> other frames measured so far
         submitted = 0
 
         def submit(pick):
@@ -274,23 +276,32 @@ class OverhangPipeline:
                 futures[pick.tray_id] = pool.submit(fn, *args)
 
         def retry(k, res):
-            """The tray is unreadable only for its outline or the frame edge (no hand): measure it on the next
-            other frame (pick_x_px / dynamic: the backup frame first, then the spares), until one reads it.
-            If none does, the first result stands."""
+            """The tray is unreadable for its outline, the frame edge or a worker's hand: measure it on the next
+            other frame (pick_x_px / dynamic: the backup frame first, then the spares, nearest first), until one
+            reads it with its box on the meat. Up to retry_frames other frames, or retry_frames_hand when the
+            first result had a hand. If none reads it, the first result stands."""
             if k in firsts and res.get("reliable") and not retry_ok(res):
                 res = dict(res, reliable=False, unreliable_reasons=["outline_check"])   # retried box not on the meat
-            if res.get("reliable") or not res.get("unreliable_reasons") or not set(res["unreliable_reasons"]) <= set(GEOMETRY):
-                backups.pop(k, None)
-                if k in firsts and res.get("reliable"):
-                    firsts.pop(k)
-                    res["frame_retry"] = True      # read on another frame
-                    return res
-                return firsts.pop(k) if k in firsts else res
-            firsts.setdefault(k, res)
+            fixable = set(GEOMETRY) | {HAND}
+            if res.get("reliable") or not res.get("unreliable_reasons") or not set(res["unreliable_reasons"]) <= fixable:
+                if k in firsts and not res.get("reliable"):
+                    pass                                   # a later frame had another problem: keep trying below
+                else:
+                    backups.pop(k, None)
+                    tries.pop(k, None)
+                    if k in firsts and res.get("reliable"):
+                        firsts.pop(k)
+                        res["frame_retry"] = True      # read on another frame
+                        return res
+                    return firsts.pop(k) if k in firsts else res
+            first = firsts.setdefault(k, res)
+            limit = cfg.retry_frames_hand if HAND in first.get("unreliable_reasons", []) else cfg.retry_frames
             rest = backups.get(k) or []
-            if not rest:
+            if not rest or tries.get(k, 0) >= limit:
                 backups.pop(k, None)
+                tries.pop(k, None)
                 return firsts.pop(k)
+            tries[k] = tries.get(k, 0) + 1
             b = rest.pop(0)
             payload = prepare(b, self.sam, cfg)
             if pool is None:

@@ -81,8 +81,11 @@ def test_tracker_drops_a_bare_hand_but_keeps_meat():
 def test_tracker_keeps_spare_frames():
     picks, _ = _run(CFG, _meat)
     p = picks[0]
-    assert 1 <= len(p.spares) <= CFG.retry_frames and all(s.frame_index != p.frame_index for s in p.spares)
-    picks, _ = _run(dataclasses.replace(CFG, retry_frames=0), _meat)
+    assert 1 <= len(p.spares) <= max(CFG.retry_frames, CFG.retry_frames_hand)
+    assert all(s.frame_index != p.frame_index for s in p.spares)
+    gaps = [abs(s.frame_index - p.frame_index) for s in p.spares]
+    assert gaps == sorted(gaps)                                          # nearest first
+    picks, _ = _run(dataclasses.replace(CFG, retry_frames=0, retry_frames_hand=0), _meat)
     assert picks[0].spares == []
 
 
@@ -132,3 +135,50 @@ def test_retried_box_must_sit_on_the_meat():
         assert r["n"] == 1 and not r["reliable"]
     finally:
         pl._measure_one = orig
+
+
+def _video(tmp_path):
+    """A short synthetic belt video with one meat tray passing right to left."""
+    path = str(tmp_path / "belt.avi")
+    w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), 10, (1456, 1088))
+    for i in range(int((1456 + 800) / 180) + 4):
+        f = _belt()
+        xc = 1456 + 400 - i * 180
+        x0, x1 = int(max(xc - 300, 0)), int(min(xc + 300, 1456))
+        if x1 > x0 + 10:
+            _meat(f, x0, 300, x1, 760)
+        w.write(f)
+    w.release()
+    return path
+
+
+def _pipeline_with(tmp_path, monkeypatch, verdict):
+    """Run the pipeline on the synthetic video with SAM and the measurement faked: verdict(frame_index, n) -> reasons."""
+    calls = []
+    monkeypatch.setattr(pl, "prepare", lambda pick, sam, cfg: dict(frame_index=pick.frame_index, tray_id=pick.tray_id))
+
+    def fake_measure(payload, *a, **k):
+        calls.append(payload["frame_index"])
+        bad = verdict(payload["frame_index"], len(calls))
+        return dict(tray_id=payload["tray_id"], frame_index=payload["frame_index"], reliable=not bad,
+                    unreliable_reasons=bad, overhang_class="none", outside_pct_of_meat=1.0)
+    monkeypatch.setattr(pl, "measure", fake_measure)
+    out = list(pl.OverhangPipeline(CFG, workers=0, sam=object()).run(_video(tmp_path)))
+    return out, calls
+
+
+def test_hand_in_the_picked_frame_is_read_on_another_frame(tmp_path, monkeypatch):
+    out, calls = _pipeline_with(tmp_path, monkeypatch, lambda fi, n: ["hand_over_tray"] if n == 1 else [])
+    assert len(out) == 1 and out[0]["reliable"] and out[0]["frame_retry"] and len(calls) == 2
+    assert out[0]["frame_index"] != calls[0]
+
+
+def test_hand_in_every_frame_stays_unreadable_after_at_most_retry_frames_hand(tmp_path, monkeypatch):
+    out, calls = _pipeline_with(tmp_path, monkeypatch, lambda fi, n: ["hand_over_tray"])
+    assert len(out) == 1 and not out[0]["reliable"] and out[0]["unreliable_reasons"] == ["hand_over_tray"]
+    assert out[0]["frame_index"] == calls[0] and 2 <= len(calls) <= 1 + CFG.retry_frames_hand
+
+
+def test_outline_problem_gets_fewer_retries_than_a_hand(tmp_path, monkeypatch):
+    out, calls = _pipeline_with(tmp_path, monkeypatch, lambda fi, n: ["outline_check"])
+    assert not out[0]["reliable"] and len(calls) <= 1 + CFG.retry_frames
