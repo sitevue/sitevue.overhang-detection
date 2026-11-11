@@ -41,8 +41,12 @@ tracking:
   # pick_x_px: measure the frame where the tray is nearest this x (full-res) instead of the frame centre.
   pick_x_px: null
   # side_views_px: [x for the tray's left half, x for its right half]: two frames per tray, each half
-  # measured where it is shifted least. Overrides pick_x_px. Two SAM runs per tray.
-  side_views_px: [1000, 730]
+  # measured where it is shifted least: the left half with the tray near x 1000 (its left end near the point
+  # under the camera), the right half near x 550 (its right end near it). At [1000, 730] the two targets were so
+  # close that 36-41% of trays got the same frame for both (one photo, at x ~730), and meat pushed to the right
+  # end read "large". If one of the two photos fails, the whole tray is read from the frame nearest the centre.
+  # Overrides pick_x_px. Two SAM runs per tray.
+  side_views_px: [1000, 550]
   # dynamic_split_px: take the first frame with the tray in view (its rightmost position). Tray at x <= this
   # there: that one frame is good for both ends (one photo). Further right: its left half from that frame,
   # its right half from the next one (two photos). The next frame is also the backup if the first cuts the

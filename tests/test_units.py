@@ -20,6 +20,12 @@ def cfg():
     return Config.load(CFG_PATH)
 
 
+@pytest.fixture(scope="module")
+def one_frame(cfg):
+    """The single frame at the centre (the shipped config uses two views)."""
+    return dataclasses.replace(cfg, side_views_px=None, edge_tolerance_px=0.0)
+
+
 def test_config_loads(cfg):
     assert (cfg.frame_w, cfg.frame_h) == (1456, 1088)
     assert cfg.scale_map is not None and len(cfg.scale_map["coef_h"]) == 5
@@ -72,7 +78,8 @@ def _frame(x_centre, w=1456, h=1088):
     return f
 
 
-def test_tracker_fast_belt_every_tray_once_near_centre(cfg):
+def test_tracker_fast_belt_every_tray_once_near_centre(one_frame):
+    cfg = one_frame
     """FPL belt: trays move right to left ~180 full-res px per frame, a new tray every ~7 frames.
     Each tray must be picked exactly once, close enough to the centre for the edge-of-view check."""
     speed, spacing, n_trays = 180, 1260, 5          # full-res px per frame, px between tray centres
@@ -96,7 +103,8 @@ def test_tracker_fast_belt_every_tray_once_near_centre(cfg):
     assert all(p.in_zone and p.frame is not None for p in picks)
 
 
-def test_tracker_merged_trays_reported_not_measured(cfg):
+def test_tracker_merged_trays_reported_not_measured(one_frame):
+    cfg = one_frame
     """With R1 on: two touching trays = one long meat blob that never fits inside the pick zone R1:
     reported once as not in the zone (counted, not measured), never measured off-centre."""
     tr = TrayTracker(dataclasses.replace(cfg, pick_zone_px=(168, 1288)))
@@ -110,7 +118,8 @@ def test_tracker_merged_trays_reported_not_measured(cfg):
     assert len(picks) == 1 and not picks[0].in_zone and picks[0].frame is None
 
 
-def test_tracker_one_pick_per_tray_near_centre(cfg):
+def test_tracker_one_pick_per_tray_near_centre(one_frame):
+    cfg = one_frame
     tr = TrayTracker(cfg)
     picks, emitted_at = [], None
     xs = list(range(-200, 1700, 25))           # tray moves left to right across the frame
