@@ -19,7 +19,7 @@ reported, as not measured (`Pick.in_zone = False`), so it is counted rather than
 Where along the belt (camera angle): the camera looks at the belt at an angle, so meat heaped above
 the tray rim is shifted in the image away from the point straight under the camera (right of the
 frame centre on the FPL camera). At the frame centre the tray's left end looks more covered than it is.
-Two options, both off by default:
+Options (the shipped config uses `side_views_px: [1000, 730]`; without any, one frame at the centre):
   `pick_x_px`      measure the one frame where the tray is nearest this x (full-res) instead of the
                    frame centre.
   `side_views_px`  [x_left_end, x_right_end]: keep two frames per tray, the one nearest each x. The

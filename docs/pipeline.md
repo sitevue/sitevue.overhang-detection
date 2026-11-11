@@ -8,11 +8,11 @@ measures how much of this tray's meat lies outside the inner opening.
 camera frames
    │  every 2nd frame, half resolution
    ▼
-1. tracker.py   meat blobs by colour, tracked across frames; one frame per tray, the one where
-   │            the tray is fully in view and closest to the frame centre. Emitted once the tray
-   │            has crossed the centre (≈ 0.5–1 s later), while it is still on the belt.
-   │            Optional (camera angle, below): pick at another x (`pick_x_px`), or keep two
-   │            frames per tray, one for each half (`side_views_px`).
+1. tracker.py   meat blobs by colour, tracked across frames. Two frames per tray (`side_views_px`,
+   │            camera angle, below): the tray's left half from the frame where it is near x 1000,
+   │            its right half from the frame near x 730, with the whole tray in view. Emitted once
+   │            the tray has passed both (≈ 0.5–1 s later), while it is still on the belt.
+   │            (Without `side_views_px`: one frame, the tray closest to the frame centre.)
    ▼
 2. sam.py       SAM 2.1 (hiera-small) tray mask. Prompts are automatic: points on the visible
    │            tray rim (positive) and on meat (negative). The only learned model; the only GPU step.
@@ -81,7 +81,10 @@ higher than two views are one-photo trays at x 790-930 with the meat against the
 `large`, as with `pick_x_px`); two views measures that end at x ~730 and reads it lower. Two views is the
 recommended mode.
 
-Two options, both off by default because the class cut-offs were tuned at the frame centre:
+**The shipped config uses two views** (`side_views_px: [1000, 730]`, with `edge_tolerance_px: 10`). The
+class cut-offs were tuned at the frame centre, so with two views fewer trays read mild or small (10-29:
+mild 16.8 % -> 6.0 %, small 2.6 % -> 1.2 %). `side_views_px: null` and `edge_tolerance_px: 0` go back to the
+single frame at the centre. The options:
 
 - `pick_x_px` (e.g. 900): measure the frame where the tray is nearest this x. Same cost. The belt moves
   180-250 px per frame, so the frame lands anywhere within about ±100 px of it.

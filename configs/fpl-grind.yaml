@@ -34,13 +34,15 @@ tracking:
   # Camera angle. The camera looks at the belt at an angle; meat heaped above the tray rim shows shifted
   # away from the point straight under the camera, which is right of the frame centre (~x 850-900).
   # At the frame centre a tray's left end looks more covered than it is (10-29: median lip cover 9.7 %
-  # at x ~730, 3.8 % one frame earlier at x ~990). Both options are OFF until the class cut-offs are
-  # re-set for them (they were tuned at the frame centre):
+  # at x ~730, 3.8 % one frame earlier at x ~990). Two views (side_views_px) is ON: the class cut-offs
+  # below were tuned at the frame centre, so with two views fewer trays read mild/small (10-29: mild
+  # 16.8 % -> 6.0 %, small 2.6 % -> 1.2 %). Set side_views_px: null and edge_tolerance_px: 0 for the old
+  # single frame at the centre.
   # pick_x_px: measure the frame where the tray is nearest this x (full-res) instead of the frame centre.
   pick_x_px: null
   # side_views_px: [x for the tray's left half, x for its right half]: two frames per tray, each half
-  # measured where it is shifted least, e.g. [1000, 730]. Overrides pick_x_px. Two SAM runs per tray.
-  side_views_px: null
+  # measured where it is shifted least. Overrides pick_x_px. Two SAM runs per tray.
+  side_views_px: [1000, 730]
   # dynamic_split_px: take the first frame with the tray in view (its rightmost position). Tray at x <= this
   # there: that one frame is good for both ends (one photo). Further right: its left half from that frame,
   # its right half from the next one (two photos). The next frame is also the backup if the first cuts the
@@ -48,7 +50,7 @@ tracking:
   dynamic_split_px: null
   # a tray box corner may be this far (full-res px) past the frame edge before the tray is edge_of_view;
   # 10 px is less than the rim's width, so nothing measured is lost
-  edge_tolerance_px: 0
+  edge_tolerance_px: 10
   # a "tray" whose meat blob is smooth and skin-coloured is a bare hand over the belt: not reported
   # (10-29: real trays have texture 16-22, bare hands 2-4; see color.skin_like)
   drop_bare_hands: true

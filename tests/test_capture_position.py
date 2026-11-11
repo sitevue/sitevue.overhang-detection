@@ -11,6 +11,7 @@ from overhang.measure import measure_tray
 from overhang.tracker import TrayTracker
 
 CFG = Config.load(os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs", "fpl-grind.yaml"))
+CENTRE = dataclasses.replace(CFG, side_views_px=None, edge_tolerance_px=0.0)   # the old single frame at the centre
 
 
 def _belt_run(cfg, speed=180, spacing=1260, n_trays=4):
@@ -28,13 +29,17 @@ def _belt_run(cfg, speed=180, spacing=1260, n_trays=4):
     return picks + tr.flush()
 
 
-def test_default_still_picks_the_frame_centre():
-    picks = _belt_run(CFG)
+def test_shipped_config_uses_two_views():
+    assert CFG.side_views_px == (1000.0, 730.0) and CFG.edge_tolerance_px == 10.0
+
+
+def test_single_frame_mode_picks_the_frame_centre():
+    picks = _belt_run(CENTRE)
     assert len(picks) == 4 and all(abs(p.c[0] * 2 - 728) <= 92 for p in picks) and all(p.views is None for p in picks)
 
 
 def test_pick_x_moves_the_measured_frame():
-    picks = _belt_run(dataclasses.replace(CFG, pick_x_px=900))
+    picks = _belt_run(dataclasses.replace(CENTRE, pick_x_px=900))
     assert len(picks) == 4 and all(abs(p.c[0] * 2 - 900) <= 92 for p in picks)
 
 
@@ -112,13 +117,13 @@ def test_view_frames_keep_the_whole_tray_box_in_view():
 def test_pick_x_keeps_the_next_frame_as_a_backup():
     """If the frame nearest x 900 is right of it, the next frame (tray further left) is kept, so a tray
     whose box corner is cut there can be measured one frame later."""
-    picks = _belt_run(dataclasses.replace(CFG, pick_x_px=900), speed=250)
+    picks = _belt_run(dataclasses.replace(CENTRE, pick_x_px=900), speed=250)
     for p in picks:
         if p.c[0] * 2 > 900:
             assert p.backup is not None and p.backup.c[0] < p.c[0] and p.backup.frame_index == p.frame_index + 1
         else:
             assert p.backup is None
-    assert all(p.backup is None for p in _belt_run(CFG, speed=250))      # default mode: unchanged
+    assert all(p.backup is None for p in _belt_run(CENTRE, speed=250))   # single frame at the centre: no backup
 
 
 def test_dynamic_one_photo_near_the_spot_two_when_further_right():
@@ -137,8 +142,7 @@ def test_dynamic_one_photo_near_the_spot_two_when_further_right():
 
 
 def test_corner_tolerance_only_when_set():
-    import overhang.measure as m  # noqa: F401  (edge_of_view uses cfg.edge_tolerance_px; default 0 = unchanged)
-    assert CFG.edge_tolerance_px == 0
+    assert Config().edge_tolerance_px == 0      # off unless the config sets it (the shipped config sets 10)
 
 
 def _pair_with(bad_left, bad_right):

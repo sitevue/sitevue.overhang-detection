@@ -163,7 +163,8 @@ def _pipeline_with(tmp_path, monkeypatch, verdict):
         return dict(tray_id=payload["tray_id"], frame_index=payload["frame_index"], reliable=not bad,
                     unreliable_reasons=bad, overhang_class="none", outside_pct_of_meat=1.0)
     monkeypatch.setattr(pl, "measure", fake_measure)
-    out = list(pl.OverhangPipeline(CFG, workers=0, sam=object()).run(_video(tmp_path)))
+    one_photo = dataclasses.replace(CFG, side_views_px=None, edge_tolerance_px=0.0)   # the retry is the same with two views
+    out = list(pl.OverhangPipeline(one_photo, workers=0, sam=object()).run(_video(tmp_path)))
     return out, calls
 
 
