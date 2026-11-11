@@ -112,13 +112,26 @@ def measure_tray(full, own_half, outline, corners, how, cfg):
     side = np.where(np.abs(uo) / W > np.abs(vo) / H, np.where(uo < 0, "left", "right"), np.where(vo < 0, "top", "bottom"))
     out_side = {sd: int((past_inner & (side == sd)).sum()) for sd in ("left", "right", "top", "bottom")}
 
+    # the same numbers per half of the tray along the belt (u < 0 = left half), so that two views of
+    # the tray can be combined: each half from the frame where it is least shifted by the camera angle
+    by, bx = np.nonzero(band)
+    ub, _ = tray_uv(bx, by, cx, cy, th)
+    on_band = band[ys, xs]
+    halves = {}
+    for name, m, mb in (("left", uo < 0, ub < 0), ("right", uo >= 0, ub >= 0)):
+        halves[name] = dict(band_px=int(mb.sum()), band_meat_px=int((on_band & m).sum()), lip_px=int((lip & m).sum()),
+                            past_green_px=int((beyond & m).sum()), meat_px=int(m.sum()),
+                            side={sd: int((past_inner & (side == sd) & m).sum()) for sd in ("left", "right", "top", "bottom")})
+
     walls = "".join(sd[0].upper() if how[sd] == "measured" else sd[0] for sd in ("left", "right", "top", "bottom"))
     # only the tray itself (its outer box) has to be in view. The belt past each end is not needed:
     # when less than half of the next-tray strip is in view, that end is treated as having no
     # neighbour (its meat is kept). On ~29,000 trays (10-29, 11-05, 11-06) the 17 that this makes
     # readable with one end unseen all read correctly by eye, except one box on two touching
     # trays, which the outline check now catches (other_meat_frac).
-    edge_of_view = not all(0 <= cx + u * c_ - v * s_ < Wf and 0 <= cy + u * s_ + v * c_ < Hf
+    # edge_tolerance_px (default 0): a corner this far out is less than the rim's width, nothing measured is lost
+    tol = cfg.edge_tolerance_px
+    edge_of_view = not all(-tol <= cx + u * c_ - v * s_ < Wf + tol and -tol <= cy + u * s_ + v * c_ < Hf + tol
                            for u in (-W / 2, W / 2) for v in (-H / 2, H / 2))
     num = dict(
         lip_cover_pct=round(100.0 * band_meat / max(band_px, 1), 2),
@@ -136,6 +149,7 @@ def measure_tray(full, own_half, outline, corners, how, cfg):
         next_tray_left=nb["left"], next_tray_right=nb["right"], dropped_next_tray_px=n_dropped,
         glove_frac=round(glove, 4), sleeve_frac=round(sleeve, 4),
         occluded=occluded, edge_of_view=edge_of_view,
+        halves=halves,
     )
     geom = dict(xs=xs, ys=ys, lip=lip, beyond=beyond, outer=(cx, cy, W, H, th), inner_contour=inner_contour)
     return num, geom

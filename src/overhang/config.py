@@ -31,6 +31,13 @@ class Config:
     track_max_centre_dist: float = 140.0
     track_emit_after_px: float = 60.0
     pick_zone_px: tuple | None = None   # R1, full-res x range, e.g. (168, 1288); None = off (whole frame)
+    pick_x_px: float | None = None      # measure the frame where the tray is nearest this x (full-res); None = frame centre
+    side_views_px: tuple | None = None  # (x for the left half, x for the right half): two frames per tray; None = off
+    dynamic_split_px: float | None = None  # rightmost in-view frame; one photo if the tray is at x <= this there, else two
+    edge_tolerance_px: float = 0.0      # a tray box corner may be this far past the frame edge before edge_of_view
+    drop_bare_hands: bool = True        # a "tray" whose meat is really a bare hand (smooth, skin-coloured) is not reported
+    retry_frames: int = 2               # a tray unreadable only for outline / edge of view is re-measured on up to this many other frames
+    retry_frames_hand: int = 4          # ... and one unreadable because of a hand over it, on up to this many
 
     sam_model: str = "facebook/sam2.1-hiera-small"
     sam_dtype: str = "float32"
@@ -85,6 +92,20 @@ class Config:
             kw["light"] = dict(y["light"])
         if "pick_zone_px" in trk:
             kw["pick_zone_px"] = tuple(trk["pick_zone_px"]) if trk["pick_zone_px"] else None
+        if trk.get("pick_x_px") is not None:
+            kw["pick_x_px"] = float(trk["pick_x_px"])
+        if trk.get("side_views_px"):
+            kw["side_views_px"] = tuple(float(v) for v in trk["side_views_px"])
+        if trk.get("dynamic_split_px") is not None:
+            kw["dynamic_split_px"] = float(trk["dynamic_split_px"])
+        if trk.get("edge_tolerance_px") is not None:
+            kw["edge_tolerance_px"] = float(trk["edge_tolerance_px"])
+        if "drop_bare_hands" in trk:
+            kw["drop_bare_hands"] = bool(trk["drop_bare_hands"])
+        if "retry_frames" in trk:
+            kw["retry_frames"] = int(trk["retry_frames"])
+        if "retry_frames_hand" in trk:
+            kw["retry_frames_hand"] = int(trk["retry_frames_hand"])
         if "workers" in rt:
             kw["workers"] = int(rt["workers"])
         return cls(**kw)

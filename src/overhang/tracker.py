@@ -16,7 +16,30 @@ the frame centre. Half trays at R1's edges never qualify. A tray that came near 
 never completely inside R1 (merged with a touching tray, or the belt jumped it past) is still
 reported, as not measured (`Pick.in_zone = False`), so it is counted rather than silently lost.
 
-The tray is emitted as soon as it has moved `emit_after_px` past that best position (or when its
+Where along the belt (camera angle): the camera looks at the belt at an angle, so meat heaped above
+the tray rim is shifted in the image away from the point straight under the camera (right of the
+frame centre on the FPL camera). At the frame centre the tray's left end looks more covered than it is.
+Options (the shipped config uses `side_views_px: [1000, 730]`; without any, one frame at the centre):
+  `pick_x_px`      measure the one frame where the tray is nearest this x (full-res) instead of the
+                   frame centre.
+  `side_views_px`  [x_left_end, x_right_end]: keep two frames per tray, the one nearest each x. The
+                   tray's left half is measured in the first (tray further right, its left end near
+                   the point under the camera), its right half in the second (`Pick.views`).
+  `dynamic_split_px` (e.g. 1000): take the rightmost frame with the tray in view (the first one, as the
+                   belt runs right to left). If the tray is at x <= split there, that one frame is good
+                   for both ends: one photo. If it is further right, its right end starts to look
+                   over-covered, so the right half comes from the next frame: two photos. The next frame
+                   is also the backup if the first one cuts the tray box. Overrides the other two.
+
+Bare hands: skin passes the meat colour rule and a hand is the size of a tray. A track whose picked
+blob is smooth and skin-coloured (`color.skin_like`) is dropped, not reported (`drop_bare_hands`).
+
+Spare frames: the last few frames with the tray fully in view are kept (`Pick.spares`), so a tray
+that is unreadable only because of its outline or the frame edge can be measured again on another
+frame (`retry_frames`); one unreadable because a worker's hand is over it, on up to
+`retry_frames_hand` frames (the hand often moves away within a frame or two).
+
+The tray is emitted as soon as it has moved `emit_after_px` past its best position(s) (or when its
 track ends), so results come out while the tray is still on the belt instead of after the video.
 """
 from __future__ import annotations
@@ -26,7 +49,9 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .color import masks, meat_blobs
+from collections import deque
+
+from .color import masks, meat_blobs, skin_like
 
 
 @dataclass
@@ -40,6 +65,10 @@ class Pick:
     frame: np.ndarray | None   # full-resolution BGR frame (raw, as read from the camera); None if not in zone
     half: np.ndarray | None    # same frame at half resolution
     in_zone: bool = True       # False: the tray was never completely inside the pick zone (not measured)
+    views: list | None = None  # side_views_px only: [Pick for the left half, Pick for the right half] (None = not seen there)
+    spares: list = field(default_factory=list)  # other frames with the tray in view, nearest first (retry_frames)
+    backup: "Pick | None" = None  # pick_x_px only: the next frame (tray further left), measured instead if this one
+                                  # cuts the tray box (edge_of_view: a tilted tray's corner past the frame edge)
 
 
 @dataclass
@@ -55,6 +84,13 @@ class _Track:
     n_obs: int = 0
     any_d: float = float("inf")  # closest to centre while fully in view, inside R1 or not
     any_best: Pick | None = None
+    vd: list = field(default_factory=list)      # per target x: distance of the best frame so far
+    vbest: list = field(default_factory=list)   # per target x: that frame
+    dyn_r: Pick | None = None                   # dynamic: rightmost (first) frame with the tray in view
+    dyn_n: Pick | None = None                   # dynamic: the next one (tray further left)
+    left_d: float = float("inf")                # pick_x_px: nearest frame to the target with the tray left of it
+    left_best: Pick | None = None
+    ring: deque = field(default_factory=lambda: deque(maxlen=8))   # recent frames with the tray in view (spares)
 
 
 class TrayTracker:
@@ -62,9 +98,17 @@ class TrayTracker:
         self.cfg = cfg
         z = cfg.pick_zone_px or (0, cfg.frame_w)
         self.zone = (z[0] / 2.0, z[1] / 2.0)       # half-res px
+        centre = cfg.frame_w / 2.0
+        if cfg.side_views_px:
+            xs = [float(x) for x in cfg.side_views_px]
+        else:
+            xs = [float(cfg.pick_x_px) if cfg.pick_x_px is not None else centre]
+        self.targets = [x / 2.0 for x in xs]       # half-res px
+        self.primary = int(np.argmin([abs(x - centre) for x in xs]))   # the view nearest the frame centre
         self.active: list[_Track] = []
         self.n_tracks = 0
         self.n_emitted = 0
+        self.n_bare_hands = 0                     # tracks dropped because the "meat" was a bare hand
 
     def _small(self, full):
         w = self.cfg.work_w
@@ -75,15 +119,48 @@ class TrayTracker:
         if tr.emitted:
             return None
         tr.emitted = True
-        if tr.best is not None and tr.best_d <= self.cfg.track_max_centre_dist:
+        if self.cfg.dynamic_split_px is not None:
+            if tr.dyn_r is None:
+                p = tr.any_best if tr.any_best is not None and tr.any_d <= self.cfg.track_max_centre_dist else None
+                if p is None:
+                    return None
+            else:
+                p = tr.dyn_r
+                p.backup = tr.dyn_n
+                if tr.dyn_n is not None and p.c[0] * 2 > self.cfg.dynamic_split_px:
+                    p.views = [tr.dyn_r, tr.dyn_n]          # left half from the first frame, right half from the next
+        elif tr.best is not None and tr.best_d <= self.cfg.track_max_centre_dist:
             p = tr.best
+            if (self.cfg.pick_x_px is not None and not self.cfg.side_views_px and tr.left_best is not None
+                    and tr.left_best is not p and p.c[0] > self.targets[0]):
+                p.backup = tr.left_best
+            if len(self.targets) > 1:
+                p.views = [b if b is not None and d <= self.cfg.track_max_centre_dist else None
+                           for b, d in zip(tr.vbest, tr.vd)]
         elif tr.best is None and tr.any_best is not None and tr.any_d <= self.cfg.track_max_centre_dist:
             p = tr.any_best      # a tray, but never completely inside R1: report it, unmeasured
         else:
             return None          # never came near the centre: a fragment
+        if self.cfg.drop_bare_hands and p.half is not None and self._bare_hand(p):
+            self.n_bare_hands += 1
+            return None          # a bare hand over the belt, not a tray
+        n_spare = max(self.cfg.retry_frames, self.cfg.retry_frames_hand)
+        if n_spare > 0:
+            used = [p] + [v for v in (p.views or []) if v is not None] + ([p.backup] if p.backup is not None else [])
+            ids = {id(x) for x in used}
+            near = lambda q: min(abs(q.frame_index - u.frame_index) for u in used)
+            p.spares = sorted((q for q in tr.ring if id(q) not in ids), key=near)[:n_spare]
         p.tray_id = self.n_emitted
         self.n_emitted += 1
         return p
+
+    def _bare_hand(self, p):
+        red, _ = masks(p.half)
+        lab, blobs = meat_blobs(red, self.cfg.track_min_area)
+        if not blobs:
+            return False
+        b = min(blobs, key=lambda b: np.hypot(b["c"][0] - p.c[0], b["c"][1] - p.c[1]))
+        return skin_like(p.half, lab == b["id"])[0]
 
     def update(self, frame_index: int, full: np.ndarray, timestamp: float | None = None) -> list[Pick]:
         """Feed every frame in order. Returns the trays that are ready (usually none)."""
@@ -126,7 +203,8 @@ class TrayTracker:
                     ready.append(p)
         for j, b in enumerate(blobs):
             if j not in used:
-                tr = _Track(id=self.n_tracks, last_f=frame_index, last_c=tuple(b["c"]), first_c=tuple(b["c"]))
+                tr = _Track(id=self.n_tracks, last_f=frame_index, last_c=tuple(b["c"]), first_c=tuple(b["c"]),
+                            vd=[float("inf")] * len(self.targets), vbest=[None] * len(self.targets))
                 self.n_tracks += 1
                 self._observe(tr, b, frame_index, full, small, timestamp, W)
                 nxt.append(tr)
@@ -134,17 +212,22 @@ class TrayTracker:
         return ready
 
     def _past_best(self, tr, b, W):
-        """Early emit only when the best frame is final: the tray has been near the centre and has now
-        crossed to the other side of the frame centre from where it came in, by emit_after_px,
+        """Early emit only when the best frame(s) are final: the tray has been near each target x and has
+        now crossed to the other side of every target from where it came in, by emit_after_px,
         as a same-sized blob (touching trays merge into one bigger blob whose centroid jumps)."""
         cfg = self.cfg
+        if cfg.dynamic_split_px is not None:
+            return not tr.emitted and tr.dyn_n is not None and 0.75 < b["area"] / max(tr.dyn_r.area, 1) < 1.33
         if tr.emitted or tr.best is None or tr.best_d > cfg.track_max_centre_dist:
             return False
         if not 0.75 < b["area"] / max(tr.best.area, 1) < 1.33:
             return False
-        came_from = np.sign(tr.first_c[0] - W / 2) or -1.0
-        past = (b["c"][0] - W / 2) * -came_from          # > 0 once on the far side of the centre
-        return past > cfg.track_emit_after_px and abs(b["c"][0] - W / 2) > tr.best_d + cfg.track_emit_after_px
+        for t, d in zip(self.targets, tr.vd):
+            came_from = np.sign(tr.first_c[0] - t) or -1.0
+            past = (b["c"][0] - t) * -came_from          # > 0 once on the far side of this target
+            if not (past > cfg.track_emit_after_px and abs(b["c"][0] - t) > min(d, 1e9) + cfg.track_emit_after_px):
+                return False
+        return True
 
     def _observe(self, tr, b, f, full, small, ts, W):
         if tr.n_obs:
@@ -157,15 +240,39 @@ class TrayTracker:
         m = self.cfg.track_edge_margin
         if not (x > m and x + w < W - m):
             return                                    # not fully in view
-        d = abs(b["c"][0] - W / 2)
+        d = abs(b["c"][0] - self.targets[self.primary])
         if d < tr.any_d:
             tr.any_d = d
             tr.any_best = Pick(tray_id=-1, frame_index=f, timestamp=ts, c=tuple(b["c"]), area=b["area"],
                                frame=None, half=None, in_zone=False)
-        if x >= self.zone[0] and x + w <= self.zone[1] and d < tr.best_d:   # completely inside R1
-            tr.best_d = d
-            tr.best = Pick(tray_id=-1, frame_index=f, timestamp=ts, c=tuple(b["c"]), area=b["area"],
-                           frame=full.copy(), half=small)
+        if not (x >= self.zone[0] and x + w <= self.zone[1]):
+            return                                    # not completely inside R1
+        # the tray box (wider than its meat) must be in view too, with room for its corners when it is
+        # tilted up to ~11 deg (trays run at -3 to -11 deg); off-centre targets would otherwise pick a cut-off tray
+        # (dynamic and two-view modes: no tilt allowance; the fitted box decides later, and a first frame
+        # that cuts the tray or fails its outline check falls back to the next one, so frames just right of
+        # the spot, x 1000-1070, stay usable for the tray's left half)
+        tilt = 0.0 if (self.cfg.dynamic_split_px is not None or self.cfg.side_views_px) else 0.2 * self.cfg.tray_h / 2
+        hw = self.cfg.tray_w / 2 + tilt + 2 - self.cfg.edge_tolerance_px / 2
+        if b["c"][0] - hw < 0 or b["c"][0] + hw > W:
+            return
+        pk = Pick(tray_id=-1, frame_index=f, timestamp=ts, c=tuple(b["c"]), area=b["area"], frame=full.copy(), half=small)
+        if max(self.cfg.retry_frames, self.cfg.retry_frames_hand) > 0:
+            tr.ring.append(pk)
+        if self.cfg.dynamic_split_px is not None:
+            if tr.dyn_r is None:
+                tr.dyn_r = pk
+            elif tr.dyn_n is None and b["c"][0] < tr.dyn_r.c[0] - 10:      # the belt moved on
+                tr.dyn_n = pk
+            return
+        for i, t in enumerate(self.targets):
+            di = abs(b["c"][0] - t)
+            if di < tr.vd[i]:
+                tr.vd[i], tr.vbest[i] = di, pk
+        t0 = self.targets[0]
+        if self.cfg.pick_x_px is not None and b["c"][0] <= t0 and t0 - b["c"][0] < tr.left_d:
+            tr.left_d, tr.left_best = t0 - b["c"][0], pk
+        tr.best_d, tr.best = tr.vd[self.primary], tr.vbest[self.primary]
 
     def flush(self) -> list[Pick]:
         """End of stream: emit trays still being tracked."""

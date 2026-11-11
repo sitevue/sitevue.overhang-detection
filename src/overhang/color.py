@@ -25,6 +25,26 @@ def meat_blobs(red, min_area):
     return lab, out
 
 
+# A bare hand (skin) passes the meat colour rule, and a hand is the size of a tray, so the tracker would
+# count it as one. Ground meat is full of fine edges, skin is smooth and more orange. On 10-29: 600 random
+# real trays had a median edge strength (|Laplacian|, half-res) of 16-22 and hue -2..+2; six bare-hand
+# blobs had 2-4 and +7..+10. Both must hold, so a blurred real tray (smooth but red) is kept.
+SKIN_MAX_TEXTURE = 10.0
+SKIN_MIN_HUE = 4.0
+
+
+def skin_like(bgr, blob):
+    """True if the meat blob (bool mask on bgr) looks like bare skin, not ground meat. Returns (skin, texture, hue)."""
+    m = cv2.erode(blob.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+    if m.sum() < 500:
+        return False, None, None
+    g = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    tex = float(np.median(np.abs(cv2.Laplacian(g, cv2.CV_32F, ksize=3))[m]))
+    h = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[..., 0][m].astype(np.float32)
+    hue = float(np.median(np.where(h > 90, h - 180, h)))      # red hue around 0
+    return bool(tex < SKIN_MAX_TEXTURE and hue >= SKIN_MIN_HUE), tex, hue
+
+
 def smooth_mask(bgr, red):
     """Edge-free, non-meat pixels: tray rims are matte, the belt is dense with edges."""
     g = cv2.GaussianBlur(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY), (3, 3), 0)
