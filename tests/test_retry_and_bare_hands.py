@@ -183,3 +183,31 @@ def test_hand_in_every_frame_stays_unreadable_after_at_most_retry_frames_hand(tm
 def test_outline_problem_gets_fewer_retries_than_a_hand(tmp_path, monkeypatch):
     out, calls = _pipeline_with(tmp_path, monkeypatch, lambda fi, n: ["outline_check"])
     assert not out[0]["reliable"] and len(calls) <= 1 + CFG.retry_frames
+
+
+import pytest
+
+
+@pytest.mark.parametrize("failed", ["left_view_failed", "right_view_failed"])
+def test_one_photo_failed_reads_the_whole_tray_from_the_centre_frame(tmp_path, monkeypatch, failed):
+    """Two views: the pair fell back to the right-half photo (left one failed); the centre frame is used instead."""
+    monkeypatch.setattr(pl, "prepare", lambda pick, sam, cfg: dict(frame_index=pick.frame_index, tray_id=pick.tray_id))
+
+    def fake_pair(pa, pb, *a, **k):
+        return dict(tray_id=pb["tray_id"], frame_index=pb["frame_index"], reliable=True, unreliable_reasons=[],
+                    overhang_class="mild", outside_pct_of_meat=2.0,
+                    views=dict(left_half=dict(frame_index=pa["frame_index"]), right_half=dict(frame_index=pb["frame_index"]),
+                               combined=False, **{failed: ["edge_of_view"]}))
+    single = []
+
+    def fake_measure(payload, *a, **k):
+        single.append(payload["frame_index"])
+        return dict(tray_id=payload["tray_id"], frame_index=payload["frame_index"], reliable=True, unreliable_reasons=[],
+                    overhang_class="none", outside_pct_of_meat=1.0, outer=dict(cx=728.0))
+    monkeypatch.setattr(pl, "measure_pair", fake_pair)
+    monkeypatch.setattr(pl, "measure", fake_measure)
+    out = list(pl.OverhangPipeline(CFG, workers=0, sam=object()).run(_video(tmp_path)))
+    assert len(out) == 1 and len(single) == 1
+    r = out[0]
+    assert r["overhang_class"] == "none" and r["views"]["whole_tray_from"] == "centre"
+    assert r["frame_index"] == single[0] == r["views"]["centre"]["frame_index"]

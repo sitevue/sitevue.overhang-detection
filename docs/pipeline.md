@@ -10,7 +10,7 @@ camera frames
    ▼
 1. tracker.py   meat blobs by colour, tracked across frames. Two frames per tray (`side_views_px`,
    │            camera angle, below): the tray's left half from the frame where it is near x 1000,
-   │            its right half from the frame near x 730, with the whole tray in view. Emitted once
+   │            its right half from the frame near x 550, with the whole tray in view. Emitted once
    │            the tray has passed both (≈ 0.5–1 s later), while it is still on the belt.
    │            (Without `side_views_px`: one frame, the tray closest to the frame centre.)
    ▼
@@ -81,14 +81,24 @@ higher than two views are one-photo trays at x 790-930 with the meat against the
 `large`, as with `pick_x_px`); two views measures that end at x ~730 and reads it lower. Two views is the
 recommended mode.
 
-**The shipped config uses two views** (`side_views_px: [1000, 730]`, with `edge_tolerance_px: 10`). The
+**Right half at x 550, not 730.** Each end is exaggerated by its own distance from the point under the camera
+(~x 850-900), so the right half is best measured with the tray well left of the centre. On a recorded live hour
+(11-11 12:00 UTC, 2,724 trays) and the 10-29 day, `[1000, 730]` gave the same frame for both photos on 36-41 %
+of trays (the two targets were closer than one frame step), so those trays were really one photo at x ~730, and
+trays with meat pushed to the right end read "large" (17,000-72,000 px past green; by eye the meat stops at the
+tray's end). At `[1000, 550]` almost every tray gets two different frames and large went from 2.8 % to 1.5 %
+(live hour) and 0.9 % to 0.6 % (10-29). If the left-half photo fails (usually the tray cut at x ~1050), the
+whole tray is read from the frame nearest the centre, not from the right-half photo, whose left end would look
+over-covered; the same when the right-half photo fails (the left-half photo would over-cover the right end).
+
+**The shipped config uses two views** (`side_views_px: [1000, 550]`, with `edge_tolerance_px: 10`). The
 class cut-offs were tuned at the frame centre, so with two views fewer trays read mild or small (10-29:
 mild 16.8 % -> 6.0 %, small 2.6 % -> 1.2 %). `side_views_px: null` and `edge_tolerance_px: 0` go back to the
 single frame at the centre. The options:
 
 - `pick_x_px` (e.g. 900): measure the frame where the tray is nearest this x. Same cost. The belt moves
   180-250 px per frame, so the frame lands anywhere within about ±100 px of it.
-- `side_views_px` (e.g. [1000, 730]): two frames per tray. The tray's left half is measured in the
+- `side_views_px` (e.g. [1000, 550]): two frames per tray. The tray's left half is measured in the
   frame nearest the first x (tray right of the camera point, its left end near it), the right half in
   the frame nearest the second, and the numbers are added up per half. Two SAM runs per tray (~+85 ms
   on the GPU). A problem in either frame (hand, edge of view, outline check) makes the tray unreliable.

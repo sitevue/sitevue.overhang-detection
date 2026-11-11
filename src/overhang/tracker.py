@@ -19,7 +19,7 @@ reported, as not measured (`Pick.in_zone = False`), so it is counted rather than
 Where along the belt (camera angle): the camera looks at the belt at an angle, so meat heaped above
 the tray rim is shifted in the image away from the point straight under the camera (right of the
 frame centre on the FPL camera). At the frame centre the tray's left end looks more covered than it is.
-Options (the shipped config uses `side_views_px: [1000, 730]`; without any, one frame at the centre):
+Options (the shipped config uses `side_views_px: [1000, 550]`; without any, one frame at the centre):
   `pick_x_px`      measure the one frame where the tray is nearest this x (full-res) instead of the
                    frame centre.
   `side_views_px`  [x_left_end, x_right_end]: keep two frames per tray, the one nearest each x. The
@@ -67,6 +67,9 @@ class Pick:
     in_zone: bool = True       # False: the tray was never completely inside the pick zone (not measured)
     views: list | None = None  # side_views_px only: [Pick for the left half, Pick for the right half] (None = not seen there)
     spares: list = field(default_factory=list)  # other frames with the tray in view, nearest first (retry_frames)
+    centre: "Pick | None" = None  # side_views_px only: the frame with the tray nearest the frame centre; the whole tray
+                                  # is read from it if one of the two photos fails (not from the other photo, whose far
+                                  # end is far from the point under the camera)
     backup: "Pick | None" = None  # pick_x_px only: the next frame (tray further left), measured instead if this one
                                   # cuts the tray box (edge_of_view: a tilted tray's corner past the frame edge)
 
@@ -86,6 +89,8 @@ class _Track:
     any_best: Pick | None = None
     vd: list = field(default_factory=list)      # per target x: distance of the best frame so far
     vbest: list = field(default_factory=list)   # per target x: that frame
+    cd: float = float("inf")                    # side_views_px: distance of the frame nearest the frame centre
+    cbest: Pick | None = None                   # ... and that frame
     dyn_r: Pick | None = None                   # dynamic: rightmost (first) frame with the tray in view
     dyn_n: Pick | None = None                   # dynamic: the next one (tray further left)
     left_d: float = float("inf")                # pick_x_px: nearest frame to the target with the tray left of it
@@ -137,6 +142,8 @@ class TrayTracker:
             if len(self.targets) > 1:
                 p.views = [b if b is not None and d <= self.cfg.track_max_centre_dist else None
                            for b, d in zip(tr.vbest, tr.vd)]
+                if tr.cbest is not None and tr.cd <= self.cfg.track_max_centre_dist:
+                    p.centre = tr.cbest
         elif tr.best is None and tr.any_best is not None and tr.any_d <= self.cfg.track_max_centre_dist:
             p = tr.any_best      # a tray, but never completely inside R1: report it, unmeasured
         else:
@@ -269,6 +276,10 @@ class TrayTracker:
             di = abs(b["c"][0] - t)
             if di < tr.vd[i]:
                 tr.vd[i], tr.vbest[i] = di, pk
+        if self.cfg.side_views_px:
+            dc = abs(b["c"][0] - W / 2)
+            if dc < tr.cd:
+                tr.cd, tr.cbest = dc, pk
         t0 = self.targets[0]
         if self.cfg.pick_x_px is not None and b["c"][0] <= t0 and t0 - b["c"][0] < tr.left_d:
             tr.left_d, tr.left_best = t0 - b["c"][0], pk

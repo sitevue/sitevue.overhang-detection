@@ -246,6 +246,8 @@ class OverhangPipeline:
         backups = {}             # tray_id -> [other frames], measured instead if the tray is unreadable only for its geometry
         firsts = {}              # tray_id -> the first result, kept if no other frame reads the tray
         tries = {}               # tray_id -> other frames measured so far
+        centres = {}             # tray_id -> frame nearest the centre (two views: used if the left-half photo fails)
+        centre_wait = {}         # tray_id -> result kept while its centre frame is measured
         submitted = 0
 
         def submit(pick):
@@ -265,6 +267,9 @@ class OverhangPipeline:
                 fn, args = measure_pair, (prepare(views[0], self.sam, cfg), prepare(views[1], self.sam, cfg))
             else:                                               # one frame (or only one view was seen)
                 fn, args = measure, (prepare(pick, self.sam, cfg),)
+            if pick.centre is not None:
+                pick.centre.tray_id = pick.tray_id
+                centres[pick.tray_id] = pick.centre
             others = ([pick.backup] if pick.backup is not None else []) + list(pick.spares or [])
             if others:
                 for o in others:
@@ -279,7 +284,30 @@ class OverhangPipeline:
             """The tray is unreadable for its outline, the frame edge or a worker's hand: measure it on the next
             other frame (pick_x_px / dynamic: the backup frame first, then the spares, nearest first), until one
             reads it with its box on the meat. Up to retry_frames other frames, or retry_frames_hand when the
-            first result had a hand. If none reads it, the first result stands."""
+            first result had a hand. If none reads it, the first result stands.
+
+            Two views: if one photo failed, the pair read the whole tray from the other one, where the tray's far
+            end is far from the point under the camera and looks over-covered (the left end in the right-half
+            photo, the right end in the left-half photo). The whole tray is then read from the frame nearest the
+            centre instead, if that reads it with its box on the meat."""
+            if k in centre_wait:                       # this is the centre frame's result
+                kept = centre_wait.pop(k)
+                if retry_ok(res):
+                    res["views"] = dict(kept.get("views") or {}, combined=False, whole_tray_from="centre",
+                                        centre=dict(frame_index=res.get("frame_index"), cx=(res.get("outer") or {}).get("cx")))
+                    centres.pop(k, None)
+                    return retry(k, res)
+                res = kept
+            c = centres.pop(k, None)
+            v = res.get("views") or {}
+            if (c is not None and res.get("reliable") and (v.get("left_view_failed") or v.get("right_view_failed"))
+                    and c.frame_index != res.get("frame_index")):
+                centre_wait[k] = res
+                payload = prepare(c, self.sam, cfg)
+                if pool is None:
+                    return retry(k, measure(payload))
+                futures[k] = pool.submit(measure, payload)
+                return None
             if k in firsts and res.get("reliable") and not retry_ok(res):
                 res = dict(res, reliable=False, unreliable_reasons=["outline_check"])   # retried box not on the meat
             fixable = set(GEOMETRY) | {HAND}

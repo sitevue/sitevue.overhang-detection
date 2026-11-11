@@ -30,7 +30,7 @@ def _belt_run(cfg, speed=180, spacing=1260, n_trays=4):
 
 
 def test_shipped_config_uses_two_views():
-    assert CFG.side_views_px == (1000.0, 730.0) and CFG.edge_tolerance_px == 10.0
+    assert CFG.side_views_px == (1000.0, 550.0) and CFG.edge_tolerance_px == 10.0
 
 
 def test_single_frame_mode_picks_the_frame_centre():
@@ -203,3 +203,16 @@ def test_failed_left_view_falls_back_to_the_other_frame():
         pl.measure = orig
     assert r["reliable"] and r["frame_index"] == 11 and r["views"]["combined"] is False
     assert r["views"]["left_view_failed"] == ["outline_check"] and "_halves" not in r
+
+
+def test_two_views_get_two_different_frames_and_a_centre_frame():
+    """At [1000, 550] the two photos are different frames (at [1000, 730] they were often the same one),
+    and the frame nearest the centre is kept for when the left-half photo fails."""
+    for speed in (180, 250):
+        picks = _belt_run(CFG, speed=speed)
+        assert len(picks) == 4
+        for p in picks:
+            left, right = p.views
+            assert left.frame_index != right.frame_index
+            assert abs(right.c[0] * 2 - 550) <= speed / 2 + 2
+            assert p.centre is not None and abs(p.centre.c[0] * 2 - 728) <= speed / 2 + 2
