@@ -44,6 +44,12 @@ class SamTray:
 
     def segment(self, half_bgr, blobs, lab, sm, j):
         """Tray mask for blob j (half-res). Returns (mask, score), or (None, 0.0) without rim points."""
+        ranked = self.segment_all(half_bgr, blobs, lab, sm, j)
+        return ranked[0] if ranked else (None, 0.0)
+
+    def segment_all(self, half_bgr, blobs, lab, sm, j):
+        """All three SAM masks for blob j, best first: [(mask, score), ...] ([] without rim points).
+        The first is the one `segment` returns; the others are tried when its box fails the outline check."""
         from PIL import Image
 
         torch = self.torch
@@ -51,7 +57,7 @@ class SamTray:
         own = lab == b["id"]
         pos = rim_points(own, sm)
         if not pos:
-            return None, 0.0
+            return []
         neg = [[int(b["c"][0]), int(b["c"][1])]] + [[int(o["c"][0]), int(o["c"][1])] for o in blobs if o is not b]
         pts = pos + neg
         lbl = [1] * len(pos) + [0] * len(neg)
@@ -65,5 +71,5 @@ class SamTray:
         m = m.numpy().astype(bool)
         # prefer a high IoU score, and masks that are not mostly meat
         meat_frac = np.array([(mi & own).sum() / max(mi.sum(), 1) for mi in m])
-        k = int(np.argmax(sc - 0.5 * meat_frac))
-        return m[k], float(sc[k])
+        order = np.argsort(-(sc - 0.5 * meat_frac), kind="stable")
+        return [(m[k], float(sc[k])) for k in order]

@@ -50,15 +50,54 @@ def prepare(pick, sam, cfg: Config) -> dict:
     if blobs:
         j = int(np.argmin([np.hypot(b["c"][0] - pick.c[0], b["c"][1] - pick.c[1]) for b in blobs]))
         t1 = time.perf_counter()
-        tray, score = sam.segment(half, blobs, lab, sm, j)
+        ranked = sam.segment_all(half, blobs, lab, sm, j) if hasattr(sam, "segment_all") else [sam.segment(half, blobs, lab, sm, j)]
         payload["timings_ms"]["sam_model"] = (time.perf_counter() - t1) * 1000
-        payload.update(tray=tray, own=lab == blobs[j]["id"], sam_score=score)
+        if ranked and ranked[0][0] is not None:
+            payload.update(tray=ranked[0][0], own=lab == blobs[j]["id"], sam_score=ranked[0][1],
+                           alt_trays=[(m, s) for m, s in ranked[1:]])
     payload["timings_ms"]["sam_total"] = (time.perf_counter() - t0) * 1000
     return payload
 
 
-def measure(payload: dict, cfg: Config | None = None, rect: Rectifier | None = None, debug_dir: str | None = None) -> dict:
-    """CPU stages for one tray (runs in a worker process). Returns the TrayResult dict."""
+GEOMETRY = ("outline_check", "edge_of_view")    # problems another SAM mask or another frame can fix
+# A retried box (another SAM mask, another frame) is a second guess: it is used only if it sits on the meat.
+# On 10-29 the correct rescues had 0-6 % of the tray's meat outside the box (all readable trays: median 1.2 %,
+# 99th percentile 8.7 %); the three wrong ones 22-53 % (a box that passes the outline check but is not on the
+# tray, so "past green" became 58,000-337,000 px). Above this the tray stays unreadable.
+RETRY_MAX_OUTSIDE_PCT = 15.0
+
+
+def retry_ok(r: dict) -> bool:
+    return bool(r.get("reliable")) and r.get("outside_pct_of_meat", 0.0) <= RETRY_MAX_OUTSIDE_PCT
+
+
+def measure(payload: dict, cfg: Config | None = None, rect: Rectifier | None = None, debug_dir: str | None = None,
+            _parts: bool = False) -> dict:
+    """CPU stages for one tray (runs in a worker process). Returns the TrayResult dict.
+    _parts=True (two-view mode): returns (result with the per-half numbers in "_halves", corrected frame, geometry).
+
+    SAM returns three masks. If the box from the first fails only the outline / edge-of-view checks (often
+    SAM's first mask covers some belt or the next tray, so the box lands in the wrong place), the other
+    two are tried and the first that passes is used (`sam_mask` = its rank). Same frame, no extra GPU work."""
+    alts = payload.get("alt_trays") or []
+    first = out = _measure_one(payload, cfg, rect, debug_dir, _parts and True)
+    res = out[0] if _parts else out
+    if not alts or not res.get("unreliable_reasons") or not set(res["unreliable_reasons"]) <= set(GEOMETRY):
+        return first
+    for k, (m, sc) in enumerate(alts, 1):
+        alt = dict(payload, tray=m, sam_score=sc)
+        out = _measure_one(alt, cfg, rect, "", _parts)          # no review image for a try that may fail
+        r = out[0] if _parts else out
+        if retry_ok(r):
+            if not _parts and (debug_dir or (debug_dir is None and _W.get("debug_dir"))):
+                out = r = _measure_one(alt, cfg, rect, debug_dir, _parts)   # again, to write its review image
+            r["sam_mask"] = k
+            return out
+    return first
+
+
+def _measure_one(payload: dict, cfg: Config | None = None, rect: Rectifier | None = None, debug_dir: str | None = None,
+                 _parts: bool = False) -> dict:
     cfg = cfg or _W["cfg"]
     rect = rect or _W["rect"]
     debug_dir = debug_dir if debug_dir is not None else _W.get("debug_dir")
@@ -70,7 +109,7 @@ def measure(payload: dict, cfg: Config | None = None, rect: Rectifier | None = N
     if tray is None or not tray.any():
         res["unreliable_reasons"] = ["no_tray_mask"]
         res["timings_ms"] = {k: round(v, 1) for k, v in tm.items()}
-        return res
+        return (res, None, None) if _parts else res
     t = time.perf_counter()
     full = rect.warp_full(payload["full"])
     half = rect.warp_half(payload["half"])
@@ -90,6 +129,7 @@ def measure(payload: dict, cfg: Config | None = None, rect: Rectifier | None = N
     num, geom = measure_tray(full, own_c, ol, corners, how, cfg)
     tm["measure"] = (time.perf_counter() - t) * 1000
 
+    halves = num.pop("halves")
     cls = overhang_class(num["lip_cover_pct"], num["past_green_px"], cfg)
     reasons = [r for r, on in (("hand_over_tray", num["occluded"]), ("edge_of_view", num["edge_of_view"]),
                                ("outline_check", not ol["outline_ok"])) if on]
@@ -99,12 +139,71 @@ def measure(payload: dict, cfg: Config | None = None, rect: Rectifier | None = N
                outer=dict(cx=round(outer_full[0], 1), cy=round(outer_full[1], 1), deg=round(float(np.rad2deg(ol["th"])), 2),
                           w=round(outer_full[3], 1), h=round(outer_full[4], 1)),
                inner_corners=np.round(corners.astype(np.float64), 1).tolist(), inner_walls=how)
+    if _parts:
+        res["_halves"] = halves
+        res["timings_ms"] = {k: round(v, 1) for k, v in tm.items()}
+        return res, full, geom
     if debug_dir:
         from .render import draw
         t = time.perf_counter()
         cv2.imwrite(os.path.join(debug_dir, f"tray_{res['tray_id']:05d}.jpg"), draw(full, geom, res), [cv2.IMWRITE_JPEG_QUALITY, 88])
         tm["debug_image"] = (time.perf_counter() - t) * 1000
     res["timings_ms"] = {k: round(v, 1) for k, v in tm.items()}
+    return res
+
+
+REASONS = ("hand_over_tray", "edge_of_view", "outline_check")
+
+
+def measure_pair(pay_left: dict, pay_right: dict, cfg: Config | None = None, rect: Rectifier | None = None,
+                 debug_dir: str | None = None) -> dict:
+    """Two-view mode (`side_views_px`): the tray's left half from one frame, its right half from another.
+    Each half is measured where the camera angle shifts it least. The result is the right-half view's
+    result with the overhang numbers replaced by the combined ones; a problem in either view (hand, edge
+    of view, outline check) makes the tray unreliable. If one view has no tray mask the other is used alone."""
+    cfg = cfg or _W["cfg"]
+    debug_dir = debug_dir if debug_dir is not None else _W.get("debug_dir")
+    (a, fa, ga), (b, fb, gb) = (measure(p, cfg, rect, None, _parts=True) for p in (pay_left, pay_right))
+    views = dict(left_half=dict(frame_index=a["frame_index"], cx=a.get("outer", {}).get("cx")),
+                 right_half=dict(frame_index=b["frame_index"], cx=b.get("outer", {}).get("cx")))
+    if "_halves" not in a or "_halves" not in b:
+        one = b if "_halves" in b else a
+        one.pop("_halves", None)
+        one["views"] = dict(views, combined=False)
+        return one
+    # only one photo has a problem (a worker's hand over the tray in that photo, the tray cut by the frame
+    # edge, or a failed outline check, e.g. SAM's mask spilling at x ~1050): read the whole tray from the
+    # other, clean photo instead of giving up. On 10-29 the hand alone made 18 trays unreadable this way.
+    bad_a, bad_b = list(a["unreliable_reasons"]), list(b["unreliable_reasons"])
+    if bool(bad_a) != bool(bad_b):
+        one, other_bad, key = (b, bad_a, "left_view_failed") if bad_a else (a, bad_b, "right_view_failed")
+        one.pop("_halves", None)
+        one["views"] = dict(views, combined=False, **{key: other_bad})
+        return one
+    L, R = a.pop("_halves")["left"], b.pop("_halves")["right"]
+    band, band_meat = L["band_px"] + R["band_px"], L["band_meat_px"] + R["band_meat_px"]
+    lip, past, meat = L["lip_px"] + R["lip_px"], L["past_green_px"] + R["past_green_px"], L["meat_px"] + R["meat_px"]
+    res = dict(b)
+    res.update(lip_cover_pct=round(100.0 * band_meat / max(band, 1), 2), outside_px=lip + past, past_green_px=past,
+               lip_px=lip, outside_pct_of_meat=round(100.0 * (lip + past) / max(meat, 1), 2), meat_px=meat,
+               lip_band_px=band, lip_band_meat_px=band_meat,
+               outside_by_side_px={k: L["side"][k] + R["side"][k] for k in L["side"]},
+               occluded=bool(a["occluded"] or b["occluded"]), edge_of_view=bool(a["edge_of_view"] or b["edge_of_view"]),
+               outline_ok=bool(a["outline_ok"] and b["outline_ok"]),
+               views=dict(views, combined=True))
+    reasons = [r for r in REASONS if r in a["unreliable_reasons"] or r in b["unreliable_reasons"]]
+    cls = overhang_class(res["lip_cover_pct"], res["past_green_px"], cfg)
+    res.update(overhang_class=cls, light=light_for(cls, cfg), reliable=not reasons, unreliable_reasons=reasons)
+    tm = {k: round(a["timings_ms"].get(k, 0) + b["timings_ms"].get(k, 0), 1) for k in set(a["timings_ms"]) | set(b["timings_ms"])}
+    if debug_dir:
+        from .render import draw
+        t = time.perf_counter()
+        ia, ib = draw(fa, ga, a), draw(fb, gb, res)
+        h = max(ia.shape[0], ib.shape[0])
+        img = np.hstack([cv2.copyMakeBorder(x, 0, h - x.shape[0], 0, 0, cv2.BORDER_CONSTANT) for x in (ia, ib)])
+        cv2.imwrite(os.path.join(debug_dir, f"tray_{res['tray_id']:05d}.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        tm["debug_image"] = round((time.perf_counter() - t) * 1000, 1)
+    res["timings_ms"] = tm
     return res
 
 
@@ -143,6 +242,8 @@ class OverhangPipeline:
         else:
             _init_worker(cfg, self.debug_dir)
         futures, done, next_out = {}, {}, 0
+        backups = {}             # tray_id -> [other frames], measured instead if the tray is unreadable only for its geometry
+        firsts = {}              # tray_id -> the first result, kept if no other frame reads the tray
         submitted = 0
 
         def submit(pick):
@@ -155,23 +256,64 @@ class OverhangPipeline:
                                           overhang_class="unknown", light=None, reliable=False,
                                           unreliable_reasons=["not_in_pick_zone"])
                 return
-            payload = prepare(pick, self.sam, cfg)
+            views = [v for v in (pick.views or []) if v is not None]
+            if pick.views is not None and len(views) == 2:      # two-view mode: each half from its own frame
+                for v in views:
+                    v.tray_id = pick.tray_id
+                fn, args = measure_pair, (prepare(views[0], self.sam, cfg), prepare(views[1], self.sam, cfg))
+            else:                                               # one frame (or only one view was seen)
+                fn, args = measure, (prepare(pick, self.sam, cfg),)
+            others = ([pick.backup] if pick.backup is not None else []) + list(pick.spares or [])
+            if others:
+                for o in others:
+                    o.tray_id = pick.tray_id
+                backups[pick.tray_id] = others
             if pool is None:
-                done[pick.tray_id] = measure(payload)
+                done[pick.tray_id] = retry(pick.tray_id, fn(*args))
             else:
-                futures[pick.tray_id] = pool.submit(measure, payload)
+                futures[pick.tray_id] = pool.submit(fn, *args)
+
+        def retry(k, res):
+            """The tray is unreadable only for its outline or the frame edge (no hand): measure it on the next
+            other frame (pick_x_px / dynamic: the backup frame first, then the spares), until one reads it.
+            If none does, the first result stands."""
+            if k in firsts and res.get("reliable") and not retry_ok(res):
+                res = dict(res, reliable=False, unreliable_reasons=["outline_check"])   # retried box not on the meat
+            if res.get("reliable") or not res.get("unreliable_reasons") or not set(res["unreliable_reasons"]) <= set(GEOMETRY):
+                backups.pop(k, None)
+                if k in firsts and res.get("reliable"):
+                    firsts.pop(k)
+                    res["frame_retry"] = True      # read on another frame
+                    return res
+                return firsts.pop(k) if k in firsts else res
+            firsts.setdefault(k, res)
+            rest = backups.get(k) or []
+            if not rest:
+                backups.pop(k, None)
+                return firsts.pop(k)
+            b = rest.pop(0)
+            payload = prepare(b, self.sam, cfg)
+            if pool is None:
+                return retry(k, measure(payload))
+            futures[k] = pool.submit(measure, payload)
+            return None
 
         def collect(block):
             nonlocal next_out
-            for k in list(futures):
-                f = futures[k]
-                if block or f.done():
-                    try:
-                        done[k] = f.result()
-                    except Exception as e:     # one bad tray must not stop the line
-                        done[k] = dict(tray_id=k, overhang_class="unknown", light=None, reliable=False,
-                                       unreliable_reasons=[f"error: {type(e).__name__}: {e}"])
-                    del futures[k]
+            while True:
+                for k in list(futures):
+                    f = futures[k]
+                    if block or f.done():
+                        del futures[k]
+                        try:
+                            r = retry(k, f.result())
+                        except Exception as e:     # one bad tray must not stop the line
+                            r = dict(tray_id=k, overhang_class="unknown", light=None, reliable=False,
+                                     unreliable_reasons=[f"error: {type(e).__name__}: {e}"])
+                        if r is not None:
+                            done[k] = r
+                if not (block and futures):
+                    break
             while next_out in done:
                 yield done.pop(next_out)
                 next_out += 1

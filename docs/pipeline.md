@@ -11,6 +11,8 @@ camera frames
 1. tracker.py   meat blobs by colour, tracked across frames; one frame per tray, the one where
    │            the tray is fully in view and closest to the frame centre. Emitted once the tray
    │            has crossed the centre (≈ 0.5–1 s later), while it is still on the belt.
+   │            Optional (camera angle, below): pick at another x (`pick_x_px`), or keep two
+   │            frames per tray, one for each half (`side_views_px`).
    ▼
 2. sam.py       SAM 2.1 (hiera-small) tray mask. Prompts are automatic: points on the visible
    │            tray rim (positive) and on meat (negative). The only learned model; the only GPU step.
@@ -31,6 +33,79 @@ camera frames
    ▼
 7. classify.py  none / mild / small / large + light colour (cut-offs in the config)
 ```
+
+## Camera angle: where along the belt to measure
+
+The camera correction (step 3) is built from the belt rollers, so it is exact for things lying on the
+belt. Meat heaped above the tray rim is higher than the belt, and it shows shifted in the image away
+from the point straight under the camera. On the FPL camera that point is right of the frame centre
+(about x 850-900). At the frame centre, where the tray is picked by default, the tray's left end
+looks more covered than it is: meat appears to slide over the left lip. One frame earlier (tray
+further right) the same lip shows clean. The opposite happens at x ~1000 to the right end.
+
+Measured on 218 trays of three 10-29 sessions that could be followed through every frame:
+
+| Tray centre x | ~730 (default pick) | ~990 (one frame earlier) |
+|---|---|---|
+| Median lip cover | 9.7 % | 3.8 % |
+| Extra meat seen past the left lip (median) | 3,500-5,200 px | 0 |
+| Class none / mild / small / large | 57 / 36 / 5 / 2 % | 90 / 6 / 1 / 2 % |
+
+The whole pipeline in each mode, on the first 338-400 trays of the same three sessions (1,138 trays):
+
+| Mode | Reliable | none / mild / small / large (reliable trays) | Median lip cover |
+|---|---|---|---|
+| Frame centre (default) | 99.6 % | 69.8 / 23.9 / 4.0 / 2.4 % | 6.6 % |
+| `pick_x_px: 900` | 99.1 % | 86.2 / 9.6 / 2.4 / 1.9 % | 4.5 % |
+| `side_views_px: [1000, 730]` | 99.1 % | 85.9 / 10.4 / 2.1 / 1.6 % | 4.3 % |
+
+Checked by eye, the trays that enter or leave `large`: with meat pushed to the left end, the default
+reads `large` (the extra "past green" is the camera angle) and both options read `mild`. With meat pushed
+to the right end, `pick_x_px` reads `large` (now the right end is exaggerated: 3 trays) and two views
+keep the default's `small`/`mild`. Two views is the one that treats both ends alike.
+
+Later run on the same 1,138 trays, with the fixes for trays at the frame edge (a box corner may be up to
+10 px out, `edge_tolerance_px: 10`; a first frame that cuts the tray or fails its outline check falls
+back to the next frame):
+
+| Mode | Unreadable | none / mild / small / large | Median lip cover | SAM runs per tray |
+|---|---|---|---|---|
+| Frame centre (default) | 4 | 69.8 / 23.9 / 4.0 / 2.4 % | 6.6 % | 1 |
+| `pick_x_px: 900` + next frame as backup | 4 | 85.8 / 9.8 / 2.4 / 2.0 % | 4.5 % | 1 (+1 for 0.5 %) |
+| `dynamic_split_px: 1000` | 3 | 87.8 / 8.0 / 2.2 / 1.9 % | 4.0 % | 1 for 82 %, 2 for 13 %, fallback 5 % |
+| `side_views_px: [1000, 730]` | 4 | 86.4 / 9.7 / 2.2 / 1.7 % | 4.2 % | 2 (98 %) |
+
+One photo is never right for both ends: each end is exaggerated by its own distance from the point under
+the camera, and the two ends are ~780 px apart. Checked by eye, the 9 trays where `dynamic` reads a class
+higher than two views are one-photo trays at x 790-930 with the meat against the right end (2 of them
+`large`, as with `pick_x_px`); two views measures that end at x ~730 and reads it lower. Two views is the
+recommended mode.
+
+Two options, both off by default because the class cut-offs were tuned at the frame centre:
+
+- `pick_x_px` (e.g. 900): measure the frame where the tray is nearest this x. Same cost. The belt moves
+  180-250 px per frame, so the frame lands anywhere within about ±100 px of it.
+- `side_views_px` (e.g. [1000, 730]): two frames per tray. The tray's left half is measured in the
+  frame nearest the first x (tray right of the camera point, its left end near it), the right half in
+  the frame nearest the second, and the numbers are added up per half. Two SAM runs per tray (~+85 ms
+  on the GPU). A problem in either frame (hand, edge of view, outline check) makes the tray unreliable.
+
+## Bare hands and retries
+
+- **Bare hands are not trays.** Skin passes the meat colour rule, and a hand is the size of a tray, so a
+  worker's bare hand over the belt was tracked and reported as an unreadable tray. Ground meat is full of
+  fine edges and skin is smooth and more orange: on 10-29, 600 random real trays had a median edge strength
+  of 16-22 and hue -2..+2, six bare hands 2-4 and +7..+10. A track whose picked blob has texture < 10 **and**
+  hue >= 4 is dropped (`drop_bare_hands`); a blurred real tray (smooth but red) is kept.
+- **A wrong box is retried.** Most outline / edge-of-view failures are a wrong first box: SAM's first mask
+  covers some belt or the next tray. SAM returns three masks; when the first fails only these checks, the
+  other two are tried (no extra GPU work). If none passes, the tray is measured on up to `retry_frames`
+  other frames with the tray in view (one SAM run each, only for these trays). A hand is not retried.
+  A retried box is a second guess, so it is used only if it sits on the meat: at most 15 % of the tray's meat
+  outside it (`RETRY_MAX_OUTSIDE_PCT`). On the 10-29 day the correct rescues had 0-6 % outside (all readable
+  trays: median 1.2 %, 99th percentile 8.7 %); three wrong ones had 22-53 % and read "large" with
+  58,000-337,000 px past green. Without the guard, the retry took the day from 185 to 161 unreadable
+  (today's mode) and 144 to 126 (two views); the guard puts those three back to unreadable.
 
 ## Speed
 
