@@ -118,10 +118,14 @@ def measure_tray(full, own_half, outline, corners, how, cfg):
     ub, _ = tray_uv(bx, by, cx, cy, th)
     on_band = band[ys, xs]
     halves = {}
+    sides = ("left", "right", "top", "bottom")
     for name, m, mb in (("left", uo < 0, ub < 0), ("right", uo >= 0, ub >= 0)):
-        halves[name] = dict(band_px=int(mb.sum()), band_meat_px=int((on_band & m).sum()), lip_px=int((lip & m).sum()),
-                            past_green_px=int((beyond & m).sum()), meat_px=int(m.sum()),
-                            side={sd: int((past_inner & (side == sd) & m).sum()) for sd in ("left", "right", "top", "bottom")})
+        per = lambda mask: {sd: int((mask & m & (side == sd)).sum()) for sd in sides}
+        h = dict(band_px=int(mb.sum()), meat_px=int(m.sum()), side=per(past_inner),
+                 band_meat_side=per(on_band), lip_side=per(lip), past_side=per(beyond))
+        h.update(band_meat_px=sum(h["band_meat_side"].values()), lip_px=sum(h["lip_side"].values()),
+                 past_green_px=sum(h["past_side"].values()))
+        halves[name] = h
 
     walls = "".join(sd[0].upper() if how[sd] == "measured" else sd[0] for sd in ("left", "right", "top", "bottom"))
     # only the tray itself (its outer box) has to be in view. The belt past each end is not needed:

@@ -90,6 +90,9 @@ tray's end). At `[1000, 550]` almost every tray gets two different frames and la
 (live hour) and 0.9 % to 0.6 % (10-29). If the left-half photo fails (usually the tray cut at x ~1050), the
 whole tray is read from the frame nearest the centre, not from the right-half photo, whose left end would look
 over-covered; the same when the right-half photo fails (the left-half photo would over-cover the right end).
+A tray seen in only one of the two positions (e.g. first seen already left of x 1000) is measured in the frame
+nearest the centre too, not in the right-half photo (shadow 11-12: 1.8 % of trays; 4 of its ~12 false "large"
+were these, measured at x 460-540).
 
 **The shipped config uses two views** (`side_views_px: [1000, 550]`, with `edge_tolerance_px: 10`). The
 class cut-offs were tuned at the frame centre, so with two views fewer trays read mild or small (10-29:
@@ -102,6 +105,17 @@ single frame at the centre. The options:
   frame nearest the first x (tray right of the camera point, its left end near it), the right half in
   the frame nearest the second, and the numbers are added up per half. Two SAM runs per tray (~+85 ms
   on the GPU). A problem in either frame (hand, edge of view, outline check) makes the tray unreliable.
+
+**Cross-photo check of the top and bottom edges.** The camera angle shifts meat along the belt (the tray's
+ends), not across it, so both photos should see about the same meat past the top and bottom edges. At the
+edges of the frame (the left-half photo near x 1000-1100, the right-half photo near x 420-450) SAM's tray mask
+is sometimes too short or too tall on the live camera and the box lands a little high or low without failing
+the outline check; meat along the top or bottom edge then counts as past green (shadow 11-11/11-12: ~4 false
+"large" a day). If one photo sees at least 2,000 px more, and 3x as much, past the top+bottom edges of a half as
+the other photo, that half's top and bottom numbers come from the other photo. On the 10-29 day it fired on
+0.3 % of trays (5 readable), turning 2 false "large" into none / mild; on a recorded live hour on 9 trays,
+the readable ones checked by eye correct. A centre frame is only used if it fits the tray's movement (a later
+frame has the tray further left): on 10-29 one "centre" frame belonged to the tray before.
 
 ## Bare hands and retries
 
