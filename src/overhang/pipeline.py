@@ -156,6 +156,31 @@ def _measure_one(payload: dict, cfg: Config | None = None, rect: Rectifier | Non
 REASONS = ("hand_over_tray", "edge_of_view", "outline_check")
 
 
+# Cross-photo check of the top and bottom edges. The camera angle shifts meat along the belt (the tray's
+# ends), not across it, so both photos should see about the same meat past the top and bottom edges. Near
+# the right edge of the frame (x 1000-1100, the left-half photo) SAM's tray mask is sometimes too short or
+# too tall on the live camera, and the box lands a little high or low without failing the outline check;
+# meat along the top or bottom edge then counts as past green (shadow 11-11/11-12: ~4 false "large" a day).
+# If one photo sees much more past the top+bottom edges than the other, that half's top and bottom numbers
+# are taken from the other photo.
+CROSS_MIN_PX = 2000      # ... at least this many more px past the top+bottom edges (one half) ...
+CROSS_RATIO = 3.0        # ... and this many times as many
+
+
+def cross_check(chosen: dict, other: dict):
+    """chosen: one half of the tray from the photo used for it; other: the same half from the other photo.
+    Returns (half, replaced?)."""
+    tb = lambda h: h["past_side"]["top"] + h["past_side"]["bottom"]
+    if tb(chosen) - tb(other) < CROSS_MIN_PX or tb(chosen) < CROSS_RATIO * tb(other):
+        return chosen, False
+    h = dict(chosen)
+    for key in ("band_meat_side", "lip_side", "past_side", "side"):
+        h[key] = dict(chosen[key], top=other[key]["top"], bottom=other[key]["bottom"])
+    h.update(band_meat_px=sum(h["band_meat_side"].values()), lip_px=sum(h["lip_side"].values()),
+             past_green_px=sum(h["past_side"].values()))
+    return h, True
+
+
 def measure_pair(pay_left: dict, pay_right: dict, cfg: Config | None = None, rect: Rectifier | None = None,
                  debug_dir: str | None = None) -> dict:
     """Two-view mode (`side_views_px`): the tray's left half from one frame, its right half from another.
@@ -181,7 +206,9 @@ def measure_pair(pay_left: dict, pay_right: dict, cfg: Config | None = None, rec
         one.pop("_halves", None)
         one["views"] = dict(views, combined=False, **{key: other_bad})
         return one
-    L, R = a.pop("_halves")["left"], b.pop("_halves")["right"]
+    ha, hb = a.pop("_halves"), b.pop("_halves")
+    L, fixed_l = cross_check(ha["left"], hb["left"])        # each half from its own photo, checked against the other photo
+    R, fixed_r = cross_check(hb["right"], ha["right"])
     band, band_meat = L["band_px"] + R["band_px"], L["band_meat_px"] + R["band_meat_px"]
     lip, past, meat = L["lip_px"] + R["lip_px"], L["past_green_px"] + R["past_green_px"], L["meat_px"] + R["meat_px"]
     res = dict(b)
@@ -192,6 +219,8 @@ def measure_pair(pay_left: dict, pay_right: dict, cfg: Config | None = None, rec
                occluded=bool(a["occluded"] or b["occluded"]), edge_of_view=bool(a["edge_of_view"] or b["edge_of_view"]),
                outline_ok=bool(a["outline_ok"] and b["outline_ok"]),
                views=dict(views, combined=True))
+    if fixed_l or fixed_r:
+        res["views"]["top_bottom_from_other_photo"] = [h for h, f in (("left_half", fixed_l), ("right_half", fixed_r)) if f]
     reasons = [r for r in REASONS if r in a["unreliable_reasons"] or r in b["unreliable_reasons"]]
     cls = overhang_class(res["lip_cover_pct"], res["past_green_px"], cfg)
     res.update(overhang_class=cls, light=light_for(cls, cfg), reliable=not reasons, unreliable_reasons=reasons)

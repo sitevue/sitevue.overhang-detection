@@ -106,6 +106,17 @@ single frame at the centre. The options:
   the frame nearest the second, and the numbers are added up per half. Two SAM runs per tray (~+85 ms
   on the GPU). A problem in either frame (hand, edge of view, outline check) makes the tray unreliable.
 
+**Cross-photo check of the top and bottom edges.** The camera angle shifts meat along the belt (the tray's
+ends), not across it, so both photos should see about the same meat past the top and bottom edges. At the
+edges of the frame (the left-half photo near x 1000-1100, the right-half photo near x 420-450) SAM's tray mask
+is sometimes too short or too tall on the live camera and the box lands a little high or low without failing
+the outline check; meat along the top or bottom edge then counts as past green (shadow 11-11/11-12: ~4 false
+"large" a day). If one photo sees at least 2,000 px more, and 3x as much, past the top+bottom edges of a half as
+the other photo, that half's top and bottom numbers come from the other photo. On the 10-29 day it fired on
+0.3 % of trays (5 readable), turning 2 false "large" into none / mild; on a recorded live hour on 9 trays,
+the readable ones checked by eye correct. A centre frame is only used if it fits the tray's movement (a later
+frame has the tray further left): on 10-29 one "centre" frame belonged to the tray before.
+
 ## Bare hands and retries
 
 - **Bare hands are not trays.** Skin passes the meat colour rule, and a hand is the size of a tray, so a

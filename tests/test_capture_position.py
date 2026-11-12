@@ -234,3 +234,42 @@ def test_single_photo_tray_uses_the_frame_nearest_the_centre():
     assert len(picks) == 1
     p = picks[0]
     assert p.views is None and abs(p.c[0] * 2 - 700) <= 2
+
+
+def test_per_side_numbers_add_up_to_each_half():
+    n = _tray(meat_shift_left=60, meat_shift_right=30)
+    for h in n["halves"].values():
+        assert sum(h["band_meat_side"].values()) == h["band_meat_px"]
+        assert sum(h["lip_side"].values()) == h["lip_px"]
+        assert sum(h["past_side"].values()) == h["past_green_px"]
+
+
+def _half(top=0, bottom=0, left=0):
+    side = dict(left=left, right=0, top=top, bottom=bottom)
+    h = dict(band_px=30000, meat_px=150000, side=dict(side), band_meat_side=dict(side), lip_side=dict(left=0, right=0, top=0, bottom=0),
+             past_side=dict(side))
+    h.update(band_meat_px=sum(h["band_meat_side"].values()), lip_px=0, past_green_px=sum(h["past_side"].values()))
+    return h
+
+
+def test_cross_check_takes_top_and_bottom_from_the_other_photo_when_they_disagree():
+    from overhang.pipeline import cross_check
+    # box a little low in this photo: 12,000 px past the top edge; the other photo sees 300
+    h, fixed = cross_check(_half(top=12000, left=4000), _half(top=300, left=9000))
+    assert fixed and h["past_side"]["top"] == 300 and h["past_side"]["left"] == 4000      # the ends stay from this photo
+    assert h["past_green_px"] == 4300 and h["band_meat_px"] == 4300
+    # real meat over the top edge, seen in both photos: kept
+    h, fixed = cross_check(_half(top=12000), _half(top=9000))
+    assert not fixed and h["past_side"]["top"] == 12000
+    # small numbers: kept
+    h, fixed = cross_check(_half(top=1500), _half(top=0))
+    assert not fixed
+
+
+def test_centre_frame_must_fit_the_trays_movement():
+    from overhang.tracker import Pick, _same_tray
+    mk = lambda f, x: Pick(tray_id=0, frame_index=f, timestamp=0, c=(x / 2, 272), area=1, frame=None, half=None)
+    left = mk(977, 885)
+    assert _same_tray(mk(978, 700), left)            # one frame later, further left: same tray
+    assert not _same_tray(mk(971, 607), left)        # six frames EARLIER but further left: another tray (10-29 b421)
+    assert _same_tray(mk(979, 885), left)            # belt stopped

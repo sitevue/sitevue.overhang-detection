@@ -98,6 +98,17 @@ class _Track:
     ring: deque = field(default_factory=lambda: deque(maxlen=8))   # recent frames with the tray in view (spares)
 
 
+def _same_tray(a: "Pick", b: "Pick", tol: float = 10.0) -> bool:
+    """Two frames of one track fit one tray's movement: the belt runs right to left, so the later frame has the
+    tray further left (or about the same place, when the belt stops). A frame that breaks this is from another
+    tray the track picked up (on 10-29 a "centre" frame from the tray before was read instead: 40,780 px past
+    green on a mild tray)."""
+    if a.frame_index == b.frame_index:
+        return abs(a.c[0] - b.c[0]) <= tol
+    later, earlier = (a, b) if a.frame_index > b.frame_index else (b, a)
+    return later.c[0] <= earlier.c[0] + tol
+
+
 class TrayTracker:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -143,6 +154,8 @@ class TrayTracker:
                 views = [b if b is not None and d <= self.cfg.track_max_centre_dist else None
                          for b, d in zip(tr.vbest, tr.vd)]
                 centre = tr.cbest if tr.cbest is not None and tr.cd <= self.cfg.track_max_centre_dist else None
+                if centre is not None and not all(_same_tray(centre, v) for v in views if v is not None):
+                    centre = None        # a frame that does not fit the tray's movement belongs to another tray
                 if sum(v is not None for v in views) < 2 and centre is not None:
                     # only one of the two photos was seen (e.g. the tray never got near x 1000): measure the
                     # whole tray in the frame nearest the centre, not the right-half photo, whose left end is
