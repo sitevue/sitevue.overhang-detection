@@ -140,10 +140,17 @@ class TrayTracker:
                     and tr.left_best is not p and p.c[0] > self.targets[0]):
                 p.backup = tr.left_best
             if len(self.targets) > 1:
-                p.views = [b if b is not None and d <= self.cfg.track_max_centre_dist else None
-                           for b, d in zip(tr.vbest, tr.vd)]
-                if tr.cbest is not None and tr.cd <= self.cfg.track_max_centre_dist:
-                    p.centre = tr.cbest
+                views = [b if b is not None and d <= self.cfg.track_max_centre_dist else None
+                         for b, d in zip(tr.vbest, tr.vd)]
+                centre = tr.cbest if tr.cbest is not None and tr.cd <= self.cfg.track_max_centre_dist else None
+                if sum(v is not None for v in views) < 2 and centre is not None:
+                    # only one of the two photos was seen (e.g. the tray never got near x 1000): measure the
+                    # whole tray in the frame nearest the centre, not the right-half photo, whose left end is
+                    # far from the point under the camera and looks over-covered
+                    p = centre
+                else:
+                    p.views = views
+                    p.centre = centre
         elif tr.best is None and tr.any_best is not None and tr.any_d <= self.cfg.track_max_centre_dist:
             p = tr.any_best      # a tray, but never completely inside R1: report it, unmeasured
         else:

@@ -216,3 +216,21 @@ def test_two_views_get_two_different_frames_and_a_centre_frame():
             assert left.frame_index != right.frame_index
             assert abs(right.c[0] * 2 - 550) <= speed / 2 + 2
             assert p.centre is not None and abs(p.centre.c[0] * 2 - 728) <= speed / 2 + 2
+
+
+def test_single_photo_tray_uses_the_frame_nearest_the_centre():
+    """A tray first seen left of x 1000 has no left-half photo: it is measured at the centre, not at x ~550."""
+    tr, picks = TrayTracker(CFG), []
+    for i in range(8):
+        f = np.full((1088, 1456, 3), 60, np.uint8)
+        for yy in range(40, 1088, 120):
+            for xx in range(30, 1456, 130):
+                cv2.rectangle(f, (xx, yy), (xx + 60, yy + 40), (0, 220, 240), -1)
+        xc = 700 - i * 180                                   # starts at x 700, already past x 1000
+        if xc + 300 > 0:
+            cv2.rectangle(f, (int(max(xc - 300, 0)), 300), (int(xc + 300), 760), (40, 40, 200), -1)
+        picks += tr.update(i, f, timestamp=i / 10)
+    picks += tr.flush()
+    assert len(picks) == 1
+    p = picks[0]
+    assert p.views is None and abs(p.c[0] * 2 - 700) <= 2

@@ -90,6 +90,9 @@ tray's end). At `[1000, 550]` almost every tray gets two different frames and la
 (live hour) and 0.9 % to 0.6 % (10-29). If the left-half photo fails (usually the tray cut at x ~1050), the
 whole tray is read from the frame nearest the centre, not from the right-half photo, whose left end would look
 over-covered; the same when the right-half photo fails (the left-half photo would over-cover the right end).
+A tray seen in only one of the two positions (e.g. first seen already left of x 1000) is measured in the frame
+nearest the centre too, not in the right-half photo (shadow 11-12: 1.8 % of trays; 4 of its ~12 false "large"
+were these, measured at x 460-540).
 
 **The shipped config uses two views** (`side_views_px: [1000, 550]`, with `edge_tolerance_px: 10`). The
 class cut-offs were tuned at the frame centre, so with two views fewer trays read mild or small (10-29:
